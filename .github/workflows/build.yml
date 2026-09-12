@@ -24,10 +24,10 @@ jobs:
         with:
           channel: 'stable'
 
-      - name: Repair and Reconstruct Android Project
+      - name: Reconstruct Android Native Code
         run: |
           rm -rf android
-          flutter create --platforms=android . --force
+          flutter create . --org com.example --project-name pocket_trading --platforms android
 
       - name: Get Dependencies
         run: flutter pub get
