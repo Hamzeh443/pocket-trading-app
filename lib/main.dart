@@ -16,7 +16,6 @@ class PocketTradingApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData.dark().copyWith(
         scaffoldBackgroundColor: const Color(0xFF0D1117),
-        cardColor: const Color(0xFF161B22),
       ),
       home: const DashboardScreen(),
     );
@@ -43,7 +42,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   int wins = 9;
   int losses = 3;
 
-  final List<Map<String, dynamic>> recentTrades = [
+  final List<Map<String, String>> recentTrades = [
     {'pair': 'EUR/USD', 'type': 'CALL', 'price': '1.08510', 'result': 'WIN', 'profit': '+$8.50'},
     {'pair': 'EUR/USD', 'type': 'PUT', 'price': '1.08535', 'result': 'WIN', 'profit': '+$8.50'},
     {'pair': 'EUR/USD', 'type': 'CALL', 'price': '1.08490', 'result': 'LOSS', 'profit': '-$10.00'},
@@ -60,12 +59,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   void _startEngine() {
     _ticker = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) return;
       setState(() {
         _counter++;
         double change = (Random().nextDouble() - 0.495) * 0.00015;
         currentPrice += change;
         candleData.add(FlSpot(_counter.toDouble(), currentPrice));
-        if (candleData.length > 25) candleData.removeAt(0);
+        if (candleData.length > 20) candleData.removeAt(0);
 
         ema12 = currentPrice * 0.15 + ema12 * 0.85;
 
@@ -76,7 +76,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           } else if (rsiValue < 32) {
             tradeSignal = 'CALL (شراء)';
           } else {
-            tradeSignal = 'NEUTRAL (محياد)';
+            tradeSignal = 'NEUTRAL (محايد)';
           }
         }
       });
@@ -92,36 +92,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   Widget build(BuildContext context) {
     int totalTrades = wins + losses;
-    double winRate = (wins / totalTrades) * 100;
+    double winRate = totalTrades > 0 ? (wins / totalTrades) * 100 : 0;
 
     return Scaffold(
       appBar: AppBar(
         backgroundColor: const Color(0xFF161B22),
         elevation: 0,
-        title: const Row(
-          children: [
-            Icon(Icons.bolt, color: Colors.cyanAccent),
-            SizedBox(width: 8),
-            Text('POCKET BOT PRO', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-          ],
-        ),
+        title: const Text('POCKET BOT PRO', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.cyanAccent)),
         actions: [
-          Container(
-            margin: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            decoration: BoxDecoration(
-              color: isAutoTrading ? Colors.green.withOpacity(0.2) : Colors.red.withOpacity(0.2),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: isAutoTrading ? Colors.green : Colors.red),
-            ),
-            child: Row(
-              children: [
-                CircleAvatar(radius: 4, backgroundColor: isAutoTrading ? Colors.greenAccent : Colors.redAccent),
-                const SizedBox(width: 6),
-                Text(isAutoTrading ? 'LIVE AUTO' : 'OFFLINE', style: TextStyle(color: isAutoTrading ? Colors.greenAccent : Colors.redAccent, fontSize: 12, fontWeight: FontWeight.bold)),
-              ],
-            ),
-          ),
           Switch(
             value: isAutoTrading,
             activeColor: Colors.cyanAccent,
@@ -135,11 +113,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
           children: [
             Row(
               children: [
-                _buildStatCard('الرصيد التجريبي', '\$${virtualBalance.toStringAsFixed(2)}', Colors.white, Icons.account_balance_wallet),
+                _buildStatCard('الرصيد', '\$${virtualBalance.toStringAsFixed(2)}', Colors.white),
                 const SizedBox(width: 8),
-                _buildStatCard('نسبة النجاح', '${winRate.toStringAsFixed(0)}%', Colors.greenAccent, Icons.pie_chart),
+                _buildStatCard('النجاح', '${winRate.toStringAsFixed(0)}%', Colors.greenAccent),
                 const SizedBox(width: 8),
-                _buildStatCard('الصفقات', '$wins / $losses', Colors.orangeAccent, Icons.show_chart),
+                _buildStatCard('الصفقات', '$wins / $losses', Colors.orangeAccent),
               ],
             ),
             const SizedBox(height: 12),
@@ -153,21 +131,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text('EUR/USD (OTC)', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
-                      Text(currentPrice.toStringAsFixed(5), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.cyanAccent)),
+                      Text(currentPrice.toStringAsFixed(5), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.cyanAccent)),
                     ],
                   ),
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      Text('إشارة البوت: $tradeSignal', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: tradeSignal.contains('CALL') ? Colors.greenAccent : (tradeSignal.contains('PUT') ? Colors.redAccent : Colors.grey))),
-                      const SizedBox(height: 4),
-                      Row(
-                        children: [
-                          _buildBadge('RSI: ${rsiValue.toStringAsFixed(1)}', Colors.orange),
-                          const SizedBox(width: 4),
-                          _buildBadge('EMA: ${ema12.toStringAsFixed(5)}', Colors.purpleAccent),
-                        ],
-                      )
+                      Text(tradeSignal, style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: tradeSignal.contains('CALL') ? Colors.greenAccent : (tradeSignal.contains('PUT') ? Colors.redAccent : Colors.grey))),
+                      Text('RSI: ${rsiValue.toStringAsFixed(1)}', style: const TextStyle(color: Colors.orange, fontSize: 11)),
                     ],
                   )
                 ],
@@ -175,14 +146,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
             const SizedBox(height: 12),
             Container(
-              height: 250,
-              padding: const EdgeInsets.only(right: 12, left: 4, top: 16, bottom: 8),
+              height: 220,
+              padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(color: const Color(0xFF161B22), borderRadius: BorderRadius.circular(12)),
-              child: candleData.isEmpty
+              child: candleData.length < 2
                   ? const Center(child: CircularProgressIndicator())
                   : LineChart(
                       LineChartData(
-                        gridData: const FlGridData(show: true, drawVerticalLine: false),
+                        gridData: const FlGridData(show: false),
                         titlesData: const FlTitlesData(show: false),
                         borderData: FlBorderData(show: false),
                         lineBarsData: [
@@ -190,10 +161,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             spots: candleData,
                             isCurved: true,
                             color: Colors.cyanAccent,
-                            barWidth: 2.5,
-                            isStrokeCapRound: true,
+                            barWidth: 2,
                             dotData: const FlDotData(show: false),
-                            belowBarData: BarAreaData(show: true, color: Colors.cyanAccent.withOpacity(0.08)),
                           ),
                         ],
                       ),
@@ -206,16 +175,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('آخر صفقات البوت المحاكية', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white70)),
+                  const Text('آخر صفقات محاكاة', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white70)),
                   const Divider(color: Colors.white10),
                   ...recentTrades.map((t) => Padding(
                     padding: const EdgeInsets.symmetric(vertical: 4.0),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text('${t['pair']} (${t['type']})', style: TextStyle(color: t['type'] == 'CALL' ? Colors.greenAccent : Colors.redAccent, fontWeight: FontWeight.bold)),
-                        Text('Price: ${t['price']}', style: const TextStyle(color: Colors.white60, fontSize: 12)),
-                        Text('${t['result']} (${t['profit']})', style: TextStyle(color: t['result'] == 'WIN' ? Colors.greenAccent : Colors.redAccent, fontWeight: FontWeight.bold)),
+                        Text('${t['pair']} (${t['type']})', style: TextStyle(color: t['type'] == 'CALL' ? Colors.greenAccent : Colors.redAccent, fontSize: 12)),
+                        Text('${t['result']} (${t['profit']})', style: TextStyle(color: t['result'] == 'WIN' ? Colors.greenAccent : Colors.redAccent, fontWeight: FontWeight.bold, fontSize: 12)),
                       ],
                     ),
                   )).toList()
@@ -228,7 +196,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _buildStatCard(String title, String val, Color col, IconData icon) {
+  Widget _buildStatCard(String title, String val, Color col) {
     return Expanded(
       child: Container(
         padding: const EdgeInsets.all(10),
@@ -236,21 +204,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(icon, size: 16, color: col),
-            const SizedBox(height: 4),
             Text(title, style: const TextStyle(fontSize: 10, color: Colors.grey)),
-            Text(val, style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: col)),
+            const SizedBox(height: 2),
+            Text(val, style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: col)),
           ],
         ),
       ),
-    );
-  }
-
-  Widget _buildBadge(String text, Color color) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(color: color.withOpacity(0.2), borderRadius: BorderRadius.circular(4)),
-      child: Text(text, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold)),
     );
   }
 }
