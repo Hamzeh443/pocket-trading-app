@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
-import 'package:fl_chart/fl_chart.dart';
 
 void main() {
   runApp(const PocketTradingApp());
@@ -30,11 +29,9 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
-  final List<FlSpot> candleData = [];
+  final List<double> prices = [];
   double currentPrice = 1.08520;
   double rsiValue = 54.2;
-  double ema12 = 1.08510;
-  
   String tradeSignal = 'WAITING';
   bool isAutoTrading = false;
   
@@ -49,7 +46,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   ];
 
   Timer? _ticker;
-  int _counter = 0;
 
   @override
   void initState() {
@@ -61,15 +57,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _ticker = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!mounted) return;
       setState(() {
-        _counter++;
         double change = (Random().nextDouble() - 0.495) * 0.00015;
         currentPrice += change;
-        candleData.add(FlSpot(_counter.toDouble(), currentPrice));
-        if (candleData.length > 20) candleData.removeAt(0);
+        prices.add(currentPrice);
+        if (prices.length > 30) prices.removeAt(0);
 
-        ema12 = currentPrice * 0.15 + ema12 * 0.85;
-
-        if (_counter % 3 == 0) {
+        if (prices.length % 3 == 0) {
           rsiValue = 25 + Random().nextDouble() * 50;
           if (rsiValue > 68) {
             tradeSignal = 'PUT (بيع)';
@@ -146,26 +139,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
             const SizedBox(height: 12),
             Container(
-              height: 220,
-              padding: const EdgeInsets.all(8),
+              height: 200,
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(color: const Color(0xFF161B22), borderRadius: BorderRadius.circular(12)),
-              child: candleData.length < 2
+              child: prices.length < 2
                   ? const Center(child: CircularProgressIndicator())
-                  : LineChart(
-                      LineChartData(
-                        gridData: const FlGridData(show: false),
-                        titlesData: const FlTitlesData(show: false),
-                        borderData: FlBorderData(show: false),
-                        lineBarsData: [
-                          LineChartBarData(
-                            spots: candleData,
-                            isCurved: true,
-                            color: Colors.cyanAccent,
-                            barWidth: 2,
-                            dotData: const FlDotData(show: false),
-                          ),
-                        ],
-                      ),
+                  : CustomPaint(
+                      painter: ChartPainter(prices),
                     ),
             ),
             const SizedBox(height: 12),
@@ -212,4 +193,39 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ),
     );
   }
+}
+
+class ChartPainter extends CustomPainter {
+  final List<double> prices;
+  ChartPainter(this.prices);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = Colors.cyanAccent
+      ..strokeWidth = 2.0
+      ..style = PaintingStyle.stroke;
+
+    double minP = prices.reduce(min);
+    double maxP = prices.reduce(max);
+    if (minP == maxP) maxP += 0.0001;
+
+    final path = Path();
+    double dx = size.width / (prices.length - 1);
+
+    for (int i = 0; i < prices.length; i++) {
+      double x = i * dx;
+      double y = size.height - ((prices[i] - minP) / (maxP - minP) * size.height);
+      if (i == 0) {
+        path.moveTo(x, y);
+      } else {
+        path.lineTo(x, y);
+      }
+    }
+
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }
