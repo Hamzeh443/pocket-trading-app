@@ -14,7 +14,10 @@ class PocketTradingApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      theme: ThemeData.dark(),
+      theme: ThemeData.dark().copyWith(
+        scaffoldBackgroundColor: const Color(0xFF0D1117),
+        cardColor: const Color(0xFF161B22),
+      ),
       home: const DashboardScreen(),
     );
   }
@@ -29,37 +32,54 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen> {
   final List<FlSpot> candleData = [];
-  double currentPrice = 1.08500;
-  double rsiValue = 50.0;
-  String tradeSignal = 'WAITING';
+  double currentPrice = 1.08520;
+  double rsiValue = 54.2;
+  double ema12 = 1.08510;
+  double ema26 = 1.08490;
+  
+  String tradeSignal = 'ANALYZING';
   bool isAutoTrading = false;
+  
+  double virtualBalance = 1000.0;
+  int totalTrades = 12;
+  int wins = 9;
+  int losses = 3;
+
+  final List<Map<String, dynamic>> recentTrades = [
+    {'pair': 'EUR/USD', 'type': 'CALL', 'price': '1.08510', 'result': 'WIN', 'profit': '+$8.50'},
+    {'pair': 'EUR/USD', 'type': 'PUT', 'price': '1.08535', 'result': 'WIN', 'profit': '+$8.50'},
+    {'pair': 'EUR/USD', 'type': 'CALL', 'price': '1.08490', 'result': 'LOSS', 'profit': '-$10.00'},
+  ];
+
   Timer? _ticker;
   int _counter = 0;
 
   @override
   void initState() {
     super.initState();
-    _startLiveStreamSim();
+    _startEngine();
   }
 
-  void _startLiveStreamSim() {
+  void _startEngine() {
     _ticker = Timer.periodic(const Duration(seconds: 1), (timer) {
       setState(() {
         _counter++;
-        double change = (Random().nextDouble() - 0.49) * 0.0002;
+        double change = (Random().nextDouble() - 0.495) * 0.00015;
         currentPrice += change;
         candleData.add(FlSpot(_counter.toDouble(), currentPrice));
-        if (candleData.length > 20) candleData.removeAt(0);
+        if (candleData.length > 25) candleData.removeAt(0);
 
-        // حساب مؤشر RSI مبسط
-        if (_counter % 3 == 0) {
-          rsiValue = 30 + Random().nextDouble() * 40;
-          if (rsiValue > 65) {
-            tradeSignal = 'SELL (PUT)';
-          } else if (rsiValue < 35) {
-            tradeSignal = 'BUY (CALL)';
+        ema12 = currentPrice * 0.15 + ema12 * 0.85;
+        ema26 = currentPrice * 0.07 + ema26 * 0.93;
+
+        if (_counter % 4 == 0) {
+          rsiValue = 25 + Random().nextDouble() * 50;
+          if (rsiValue > 68 && ema12 < currentPrice) {
+            tradeSignal = 'PUT (بيع قاطع)';
+          } else if (rsiValue < 32 && ema12 > currentPrice) {
+            tradeSignal = 'CALL (شراء قاطع)';
           } else {
-            tradeSignal = 'NEUTRAL';
+            tradeSignal = 'NEUTRAL (انتظار)';
           }
         }
       });
@@ -74,96 +94,172 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
+    double winRate = (wins / totalTrades) * 100;
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Pocket Option Bot Live'),
-        backgroundColor: Colors.black87,
+        backgroundColor: const Color(0xFF161B22),
+        elevation: 0,
+        title: const Row(
+          children: [
+            Icon(Icons.bolt, color: Colors.cyanAccent),
+            SizedBox(width: 8),
+            Text('POCKET BOT PRO', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+          ],
+        ),
         actions: [
+          Container(
+            margin: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: isAutoTrading ? Colors.green.withOpacity(0.2) : Colors.red.withOpacity(0.2),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: isAutoTrading ? Colors.green : Colors.red),
+            ),
+            child: Row(
+              children: [
+                CircleAvatar(radius: 4, backgroundColor: isAutoTrading ? Colors.greenAccent : Colors.redAccent),
+                const SizedBox(width: 6),
+                Text(isAutoTrading ? 'LIVE AUTO' : 'OFFLINE', style: TextStyle(color: isAutoTrading ? Colors.greenAccent : Colors.redAccent, fontSize: 12, fontWeight: FontWeight.bold)),
+              ],
+            ),
+          ),
           Switch(
             value: isAutoTrading,
-            activeColor: Colors.greenAccent,
-            onChanged: (val) {
-              setState(() {
-                isAutoTrading = val;
-              });
-            },
+            activeColor: Colors.cyanAccent,
+            onChanged: (val) => setState(() => isAutoTrading = val),
           )
         ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(12.0),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Card(
-              color: Colors.grey[900],
-              child: Padding(
-                padding: const EdgeInsets.all(12.0),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('EUR/USD (OTC)', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                        Text('Price: ${currentPrice.toStringAsFixed(5)}', style: const TextStyle(color: Colors.greenAccent)),
-                      ],
-                    ),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Text('RSI: ${rsiValue.toStringAsFixed(1)}', style: const TextStyle(color: Colors.orangeAccent)),
-                        Text('Signal: $tradeSignal', style: TextStyle(color: tradeSignal.contains('BUY') ? Colors.green : (tradeSignal.contains('SELL') ? Colors.red : Colors.grey), fontWeight: FontWeight.bold)),
-                      ],
-                    ),
-                  ],
-                ),
+            // الإحصائيات العلوية
+            Row(
+              children: [
+                _buildStatCard('الرصيد التجريبي', '\$${virtualBalance.toStringAsFixed(2)}', Colors.white, Icons.account_balance_wallet),
+                const SizedBox(width: 8),
+                _buildStatCard('نسبة النجاح', '${winRate.toStringAsFixed(0)}%', Colors.greenAccent, Icons.pie_chart),
+                const SizedBox(width: 8),
+                _buildStatCard('الصفقات', '$winsW / $lossesL', Colors.orangeAccent, Icons.show_chart),
+              ],
+            ),
+            const SizedBox(height: 12),
+
+            // كارت الزوج المباشر والإشارات
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: const Color(0xFF161B22), borderRadius: BorderRadius.circular(12)),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('EUR/USD (OTC)', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+                      Text(currentPrice.toStringAsFixed(5), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.cyanAccent)),
+                    ],
+                  ),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text('إشارة البوت: $tradeSignal', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: tradeSignal.contains('CALL') ? Colors.greenAccent : (tradeSignal.contains('PUT') ? Colors.redAccent : Colors.grey))),
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          _buildBadge('RSI: ${rsiValue.toStringAsFixed(1)}', Colors.orange),
+                          const SizedBox(width: 4),
+                          _buildBadge('EMA: ${ema12.toStringAsFixed(5)}', Colors.purpleAccent),
+                        ],
+                      )
+                    ],
+                  )
+                ],
               ),
             ),
-            const SizedBox(height: 15),
+            const SizedBox(height: 12),
+
+            // الشارت التفاعلي المتقدم
             Container(
-              height: 280,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.black45,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.grey.shade800),
-              ),
+              height: 250,
+              padding: const EdgeInsets.only(right: 12, left: 4, top: 16, bottom: 8),
+              decoration: BoxDecoration(color: const Color(0xFF161B22), borderRadius: BorderRadius.circular(12)),
               child: candleData.isEmpty
                   ? const Center(child: CircularProgressIndicator())
                   : LineChart(
                       LineChartData(
-                        gridData: const FlGridData(show: true),
+                        gridData: FlGridData(show: true, drawVerticalLine: false, getDrawingHorizontalLine: (v) => FlLine(color: Colors.white10, strokeWidth: 1)),
                         titlesData: const FlTitlesData(show: false),
+                        borderData: FlBorderData(show: false),
                         lineBarsData: [
                           LineChartBarData(
                             spots: candleData,
                             isCurved: true,
                             color: Colors.cyanAccent,
-                            barWidth: 2,
+                            barWidth: 2.5,
+                            isStrokeCapRound: true,
                             dotData: const FlDotData(show: false),
+                            belowBarData: BarAreaData(show: true, color: Colors.cyanAccent.withOpacity(0.08)),
                           ),
                         ],
                       ),
                     ),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 12),
+
+            // سجل الصفقات الحية
             Container(
               padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: isAutoTrading ? Colors.green.withOpacity(0.15) : Colors.red.withOpacity(0.15),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: isAutoTrading ? Colors.green : Colors.red),
-              ),
-              child: Text(
-                isAutoTrading ? 'التداول الآلي مفعل: سيتم تنفيذ الصفقات فور ظهور الإشارة' : 'التداول الآلي متوقف',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: isAutoTrading ? Colors.greenAccent : Colors.redAccent, fontWeight: FontWeight.bold),
+              decoration: BoxDecoration(color: const Color(0xFF161B22), borderRadius: BorderRadius.circular(12)),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('آخر صفقات البوت المحاكية', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white70)),
+                  const Divider(color: Colors.white10),
+                  ...recentTrades.map((t) => Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4.0),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('${t['pair']} (${t['type']})', style: TextStyle(color: t['type'] == 'CALL' ? Colors.greenAccent : Colors.redAccent, fontWeight: FontWeight.bold)),
+                        Text('Price: ${t['price']}', style: const TextStyle(color: Colors.white60, fontSize: 12)),
+                        Text('${t['result']} (${t['profit']})', style: TextStyle(color: t['result'] == 'WIN' ? Colors.greenAccent : Colors.redAccent, fontWeight: FontWeight.bold)),
+                      ],
+                    ),
+                  )).toList()
+                ],
               ),
             )
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildStatCard(String title, String val, Color col, IconData icon) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(color: const Color(0xFF161B22), borderRadius: BorderRadius.circular(10)),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, size: 16, color: col),
+            const SizedBox(height: 4),
+            Text(title, style: const TextStyle(fontSize: 10, color: Colors.grey)),
+            Text(val, style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: col)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBadge(String text, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(color: color.withOpacity(0.2), borderRadius: BorderRadius.circular(4)),
+      child: Text(text, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold)),
     );
   }
 }
