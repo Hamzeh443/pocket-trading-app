@@ -89,7 +89,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         actions: [
           Switch(
             value: isAutoTrading,
-            activeColor: Colors.cyanAccent,
+            activeTrackColor: Colors.cyanAccent,
             onChanged: (val) => setState(() => isAutoTrading = val),
           )
         ],
