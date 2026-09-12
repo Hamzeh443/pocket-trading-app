@@ -35,13 +35,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
   double currentPrice = 1.08520;
   double rsiValue = 54.2;
   double ema12 = 1.08510;
-  double ema26 = 1.08490;
   
-  String tradeSignal = 'ANALYZING';
+  String tradeSignal = 'WAITING';
   bool isAutoTrading = false;
   
   double virtualBalance = 1000.0;
-  int totalTrades = 12;
   int wins = 9;
   int losses = 3;
 
@@ -70,16 +68,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
         if (candleData.length > 25) candleData.removeAt(0);
 
         ema12 = currentPrice * 0.15 + ema12 * 0.85;
-        ema26 = currentPrice * 0.07 + ema26 * 0.93;
 
-        if (_counter % 4 == 0) {
+        if (_counter % 3 == 0) {
           rsiValue = 25 + Random().nextDouble() * 50;
-          if (rsiValue > 68 && ema12 < currentPrice) {
-            tradeSignal = 'PUT (بيع قاطع)';
-          } else if (rsiValue < 32 && ema12 > currentPrice) {
-            tradeSignal = 'CALL (شراء قاطع)';
+          if (rsiValue > 68) {
+            tradeSignal = 'PUT (بيع)';
+          } else if (rsiValue < 32) {
+            tradeSignal = 'CALL (شراء)';
           } else {
-            tradeSignal = 'NEUTRAL (انتظار)';
+            tradeSignal = 'NEUTRAL (محياد)';
           }
         }
       });
@@ -94,6 +91,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
+    int totalTrades = wins + losses;
     double winRate = (wins / totalTrades) * 100;
 
     return Scaffold(
@@ -135,19 +133,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
         padding: const EdgeInsets.all(12.0),
         child: Column(
           children: [
-            // الإحصائيات العلوية
             Row(
               children: [
                 _buildStatCard('الرصيد التجريبي', '\$${virtualBalance.toStringAsFixed(2)}', Colors.white, Icons.account_balance_wallet),
                 const SizedBox(width: 8),
                 _buildStatCard('نسبة النجاح', '${winRate.toStringAsFixed(0)}%', Colors.greenAccent, Icons.pie_chart),
                 const SizedBox(width: 8),
-                _buildStatCard('الصفقات', '$winsW / $lossesL', Colors.orangeAccent, Icons.show_chart),
+                _buildStatCard('الصفقات', '$wins / $losses', Colors.orangeAccent, Icons.show_chart),
               ],
             ),
             const SizedBox(height: 12),
-
-            // كارت الزوج المباشر والإشارات
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(color: const Color(0xFF161B22), borderRadius: BorderRadius.circular(12)),
@@ -179,8 +174,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
             ),
             const SizedBox(height: 12),
-
-            // الشارت التفاعلي المتقدم
             Container(
               height: 250,
               padding: const EdgeInsets.only(right: 12, left: 4, top: 16, bottom: 8),
@@ -189,7 +182,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ? const Center(child: CircularProgressIndicator())
                   : LineChart(
                       LineChartData(
-                        gridData: FlGridData(show: true, drawVerticalLine: false, getDrawingHorizontalLine: (v) => FlLine(color: Colors.white10, strokeWidth: 1)),
+                        gridData: const FlGridData(show: true, drawVerticalLine: false),
                         titlesData: const FlTitlesData(show: false),
                         borderData: FlBorderData(show: false),
                         lineBarsData: [
@@ -207,8 +200,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ),
             ),
             const SizedBox(height: 12),
-
-            // سجل الصفقات الحية
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(color: const Color(0xFF161B22), borderRadius: BorderRadius.circular(12)),
