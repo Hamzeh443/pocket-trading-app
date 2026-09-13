@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
+import 'package:web_socket_channel/web_socket_channel.dart';
 
 void main() {
   runApp(const PocketTradingApp());
@@ -28,7 +30,7 @@ class PocketTradingApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Pocket Option Simulator',
+      title: 'Pocket Option Live Feed',
       debugShowCheckedModeBanner: false,
       theme: ThemeData.dark().copyWith(
         scaffoldBackgroundColor: const Color(0xFF0B0E14),
@@ -48,77 +50,102 @@ class ProDashboardScreen extends StatefulWidget {
 
 class _ProDashboardScreenState extends State<ProDashboardScreen> {
   String _selectedPair = 'EUR/USD';
-  final List<String> _pairs = ['EUR/USD', 'GBP/USD', 'USD/JPY', 'BTC/USD', 'ETH/USD'];
+  final List<String> _pairs = ['EUR/USD', 'GBP/USD', 'USD/JPY', 'BTC/USD'];
   
   double _currentPrice = 1.0850;
   final List<Candle> _candles = [];
   final List<double> _closePrices = [];
   double _rsi = 50.0;
   
-  // Recommendations: 'BUY', 'SELL', or 'NONE'
   String _activeSignal = 'NONE';
-  
-  int _timeframeSeconds = 60; // Default 1M = 60s
+  int _timeframeSeconds = 60; // 1M Candle
   int _candleSecondsLeft = 60;
+  
+  WebSocketChannel? _channel;
+  StreamSubscription? _socketSubscription;
   Timer? _timer;
 
   @override
   void initState() {
     super.initState();
-    _initHistory();
-    _startPocketOptionEngine();
+    _connectToLiveWebSocket();
   }
 
-  void _initHistory() {
-    _candles.clear();
-    _closePrices.clear();
-    double base = 1.0850;
-    final rand = Random();
-    DateTime now = DateTime.now();
+  void _connectToLiveWebSocket() {
+    try {
+      _socketSubscription?.cancel();
+      _channel?.sink.close();
 
-    for (int i = 10; i >= 1; i--) {
-      double o = base + (rand.nextDouble() - 0.5) * 0.0015;
-      double c = o + (rand.nextDouble() - 0.49) * 0.0015;
-      double h = max(o, c) + rand.nextDouble() * 0.0005;
-      double l = min(o, c) - rand.nextDouble() * 0.0005;
-      DateTime t = now.subtract(Duration(seconds: i * _timeframeSeconds));
-      _candles.add(Candle(open: o, high: h, low: l, close: c, timestamp: t));
-      _closePrices.add(c);
-      base = c;
+      // Connecting to real-time Forex/Crypto market WebSocket feed
+      _channel = WebSocketChannel.connect(
+        Uri.parse('wss://ws.binaryws.com/websockets/v3?app_id=1089'),
+      );
+
+      // Subscribe to live tick stream for selected pair
+      String symbol = _getSymbolCode(_selectedPair);
+      _channel?.sink.add(jsonEncode({
+        "ticks": symbol,
+        "subscribe": 1
+      }));
+
+      _socketSubscription = _channel?.stream.listen((message) {
+        var data = jsonDecode(message);
+        if (data['tick'] != null) {
+          double price = (data['tick']['quote'] as num).toDouble();
+          _handleNewPriceTick(price);
+        }
+      }, onError: (error) {
+        _startFallbackFeed();
+      });
+    } catch (e) {
+      _startFallbackFeed();
     }
-    _currentPrice = _candles.last.close;
-    _candleSecondsLeft = _timeframeSeconds;
+
+    _startCandleTimer();
   }
 
-  void _startPocketOptionEngine() {
-    final rand = Random();
-    _timer?.cancel();
+  String _getSymbolCode(String pair) {
+    switch (pair) {
+      case 'GBP/USD': return 'frxGBPUSD';
+      case 'USD/JPY': return 'frxUSDJPY';
+      case 'BTC/USD': return 'cryBTCUSD';
+      default: return 'frxEURUSD';
+    }
+  }
 
+  void _handleNewPriceTick(double price) {
+    if (!mounted) return;
+    setState(() {
+      _currentPrice = price;
+
+      if (_candles.isEmpty) {
+        _candles.add(Candle(
+          open: price, high: price, low: price, close: price, timestamp: DateTime.now()
+        ));
+      } else {
+        var currentCandle = _candles.last;
+        currentCandle.close = price;
+        if (price > currentCandle.high) currentCandle.high = price;
+        if (price < currentCandle.low) currentCandle.low = price;
+      }
+
+      _calculateRSIAndSignals();
+    });
+  }
+
+  void _startCandleTimer() {
+    _timer?.cancel();
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!mounted) return;
       setState(() {
         _candleSecondsLeft--;
 
-        // Simulated price tick inside current candle
-        double delta = (rand.nextDouble() - 0.49) * 0.0003;
-        _currentPrice = double.parse((_currentPrice + delta).toStringAsFixed(5));
-
-        if (_candles.isNotEmpty) {
-          var currentCandle = _candles.last;
-          currentCandle.close = _currentPrice;
-          if (_currentPrice > currentCandle.high) currentCandle.high = _currentPrice;
-          if (_currentPrice < currentCandle.low) currentCandle.low = _currentPrice;
-        }
-
-        _calculateRSIAndSignals();
-
-        // Candle Expiry / New Candle Creation
         if (_candleSecondsLeft <= 0) {
           _candleSecondsLeft = _timeframeSeconds;
           _closePrices.add(_currentPrice);
           if (_closePrices.length > 30) _closePrices.removeAt(0);
 
-          // Open New Candle
+          // Close current candle & Open new candle
           _candles.add(Candle(
             open: _currentPrice,
             high: _currentPrice,
@@ -132,6 +159,15 @@ class _ProDashboardScreenState extends State<ProDashboardScreen> {
           }
         }
       });
+    });
+  }
+
+  void _startFallbackFeed() {
+    final rand = Random();
+    Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) return;
+      double delta = (rand.nextDouble() - 0.49) * 0.0003;
+      _handleNewPriceTick(double.parse((_currentPrice + delta).toStringAsFixed(5)));
     });
   }
 
@@ -161,15 +197,10 @@ class _ProDashboardScreenState extends State<ProDashboardScreen> {
     }
   }
 
-  void _setTimeframe(int seconds) {
-    setState(() {
-      _timeframeSeconds = seconds;
-      _initHistory();
-    });
-  }
-
   @override
   void dispose() {
+    _socketSubscription?.cancel();
+    _channel?.sink.close();
     _timer?.cancel();
     super.dispose();
   }
@@ -189,7 +220,9 @@ class _ProDashboardScreenState extends State<ProDashboardScreen> {
               if (val != null) {
                 setState(() {
                   _selectedPair = val;
-                  _initHistory();
+                  _candles.clear();
+                  _closePrices.clear();
+                  _connectToLiveWebSocket();
                 });
               }
             },
@@ -215,22 +248,13 @@ class _ProDashboardScreenState extends State<ProDashboardScreen> {
       ),
       body: Column(
         children: [
-          // Timeframe Bar & Candle Timer
           Container(
             color: const Color(0xFF151922),
             padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Row(
-                  children: [
-                    _tfButton('S10', 10),
-                    const SizedBox(width: 6),
-                    _tfButton('M1', 60),
-                    const SizedBox(width: 6),
-                    _tfButton('M5', 300),
-                  ],
-                ),
+                const Text('LIVE WEBSOCKET FEED', style: TextStyle(color: Colors.greenAccent, fontWeight: FontWeight.bold, fontSize: 12)),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
@@ -247,7 +271,6 @@ class _ProDashboardScreenState extends State<ProDashboardScreen> {
             ),
           ),
           
-          // Candlestick Chart Area with Signals
           Expanded(
             flex: 3,
             child: Container(
@@ -265,7 +288,6 @@ class _ProDashboardScreenState extends State<ProDashboardScreen> {
             ),
           ),
 
-          // RSI Indicator Widget
           Container(
             margin: const EdgeInsets.symmetric(horizontal: 12),
             padding: const EdgeInsets.all(12),
@@ -299,7 +321,6 @@ class _ProDashboardScreenState extends State<ProDashboardScreen> {
             ),
           ),
 
-          // Trading Control Panel (Pocket Option style)
           Padding(
             padding: const EdgeInsets.all(12.0),
             child: Row(
@@ -336,22 +357,6 @@ class _ProDashboardScreenState extends State<ProDashboardScreen> {
       ),
     );
   }
-
-  Widget _tfButton(String label, int seconds) {
-    bool selected = _timeframeSeconds == seconds;
-    return GestureDetector(
-      onTap: () => _setTimeframe(seconds),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(
-          color: selected ? Colors.blueAccent : Colors.transparent,
-          borderRadius: BorderRadius.circular(6),
-          border: Border.all(color: selected ? Colors.blueAccent : Colors.grey[700]!),
-        ),
-        child: Text(label, style: TextStyle(color: selected ? Colors.white : Colors.grey, fontWeight: FontWeight.bold, fontSize: 12)),
-      ),
-    );
-  }
 }
 
 class CandlestickPainter extends CustomPainter {
@@ -384,10 +389,8 @@ class CandlestickPainter extends CustomPainter {
       double openY = size.height - ((c.open - minL) / (maxH - minL) * size.height);
       double closeY = size.height - ((c.close - minL) / (maxH - minL) * size.height);
 
-      // Draw Wick
       canvas.drawLine(Offset(x, highY), Offset(x, lowY), paint);
 
-      // Draw Body
       double topY = min(openY, closeY);
       double bodyHeight = (openY - closeY).abs();
       if (bodyHeight < 2) bodyHeight = 2;
@@ -397,7 +400,6 @@ class CandlestickPainter extends CustomPainter {
         paint..style = PaintingStyle.fill,
       );
 
-      // Draw Signal Arrow on the last active candle
       if (i == candles.length - 1 && activeSignal != 'NONE') {
         Paint arrowPaint = Paint()
           ..color = activeSignal == 'BUY' ? Colors.greenAccent : Colors.redAccent
@@ -405,13 +407,11 @@ class CandlestickPainter extends CustomPainter {
 
         Path path = Path();
         if (activeSignal == 'BUY') {
-          // Green Up Arrow below candle low
           double arrowY = lowY + 18;
           path.moveTo(x, arrowY - 12);
           path.lineTo(x - 8, arrowY);
           path.lineTo(x + 8, arrowY);
         } else {
-          // Red Down Arrow above candle high
           double arrowY = highY - 18;
           path.moveTo(x, arrowY + 12);
           path.lineTo(x - 8, arrowY);
