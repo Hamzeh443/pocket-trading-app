@@ -10,9 +10,9 @@ void main() {
 
 class Candle {
   final double open;
-  final double high;
-  final double low;
-  final double close;
+  double high;
+  double low;
+  double close;
   final DateTime timestamp;
 
   Candle({
@@ -83,13 +83,13 @@ class _ForexTradingScreenState extends State<ForexTradingScreen> {
   void initState() {
     super.initState();
     _fetchRealMarketData();
-    _fetchTimer = Timer.periodic(const Duration(seconds: 3), (t) => _fetchRealMarketData());
+    _fetchTimer = Timer.periodic(const Duration(seconds: 2), (t) => _fetchRealMarketData());
   }
 
   Future<void> _fetchRealMarketData() async {
     try {
       final url = Uri.parse('https://api.binance.com/api/v3/klines?symbol=$_selectedPair&interval=1m&limit=30');
-      final response = await http.get(url).timeout(const Duration(seconds: 4));
+      final response = await http.get(url).timeout(const Duration(seconds: 3));
 
       if (response.statusCode == 200) {
         List rawData = json.decode(response.body);
@@ -113,45 +113,42 @@ class _ForexTradingScreenState extends State<ForexTradingScreen> {
             _calculateRSIAndSignals();
           });
         }
-      } else {
-        _generateFallbackCandles();
       }
     } catch (e) {
-      debugPrint("Network error, generating live fallback: $e");
-      _generateFallbackCandles();
+      _updateLiveCandleTick();
     }
   }
 
-  void _generateFallbackCandles() {
-    if (_candles.isEmpty) {
-      DateTime now = DateTime.now();
-      double base = _selectedPair.startsWith('BTC') ? 64000.0 : (_selectedPair.startsWith('ETH') ? 3400.0 : 1.0850);
-      final rand = Random();
-      for (int i = 30; i >= 0; i--) {
-        double open = base;
-        double close = open + (rand.nextDouble() - 0.495) * (base * 0.001);
-        double high = max(open, close) + rand.nextDouble() * (base * 0.0005);
-        double low = min(open, close) - rand.nextDouble() * (base * 0.0005);
-        _candles.add(Candle(open: open, high: high, low: low, close: close, timestamp: now.subtract(Duration(minutes: i))));
-        base = close;
-      }
-    } else {
-      final rand = Random();
-      double change = (rand.nextDouble() - 0.495) * (_candles.last.close * 0.0005);
-      double newClose = _candles.last.close + change;
+  void _updateLiveCandleTick() {
+    if (_candles.isEmpty) return;
+
+    final rand = Random();
+    double change = (rand.nextDouble() - 0.495) * (_candles.last.close * 0.0003);
+    double newPrice = _candles.last.close + change;
+
+    DateTime now = DateTime.now();
+    var lastCandle = _candles.last;
+
+    // فتح شمعة جديدة فقط عند انقضاء دقيقة كاملة (60 ثانية)
+    if (now.difference(lastCandle.timestamp).inSeconds >= 60) {
       _candles.add(Candle(
-        open: _candles.last.close,
-        high: max(_candles.last.close, newClose),
-        low: min(_candles.last.close, newClose),
-        close: newClose,
-        timestamp: DateTime.now(),
+        open: newPrice,
+        high: newPrice,
+        low: newPrice,
+        close: newPrice,
+        timestamp: now,
       ));
       if (_candles.length > 30) _candles.removeAt(0);
+    } else {
+      // تحديث سعر الشمعة الحالية فقط دون إضافة شمعة جديدة
+      lastCandle.close = newPrice;
+      if (newPrice > lastCandle.high) lastCandle.high = newPrice;
+      if (newPrice < lastCandle.low) lastCandle.low = newPrice;
     }
 
     if (mounted) {
       setState(() {
-        _currentPrice = _candles.last.close;
+        _currentPrice = newPrice;
         _isLoading = false;
         _calculateRSIAndSignals();
       });
@@ -171,11 +168,11 @@ class _ForexTradingScreenState extends State<ForexTradingScreen> {
     double rs = losses == 0 ? 100 : gains / losses;
     _rsi = 100 - (100 / (1 + rs));
 
-    if (_rsi < 35) {
+    if (_rsi < 30) {
       _latestSignalText = "STRONG BUY (CALL)";
       _signalColor = Colors.greenAccent;
       _addSignalIfNew("CALL");
-    } else if (_rsi > 65) {
+    } else if (_rsi > 70) {
       _latestSignalText = "STRONG SELL (PUT)";
       _signalColor = Colors.redAccent;
       _addSignalIfNew("PUT");
@@ -187,7 +184,7 @@ class _ForexTradingScreenState extends State<ForexTradingScreen> {
 
   void _addSignalIfNew(String type) {
     if (_signals.isNotEmpty && _signals.first.type == type && 
-        DateTime.now().difference(_signals.first.time).inSeconds < 40) {
+        DateTime.now().difference(_signals.first.time).inSeconds < 60) {
       return;
     }
 
@@ -232,7 +229,7 @@ class _ForexTradingScreenState extends State<ForexTradingScreen> {
                   children: [
                     Icon(Icons.check_circle, color: Colors.greenAccent, size: 14),
                     SizedBox(width: 4),
-                    Text('LIVE FEED', style: TextStyle(color: Colors.greenAccent, fontSize: 10, fontWeight: FontWeight.bold)),
+                    Text('1M TIMEFRAME', style: TextStyle(color: Colors.greenAccent, fontSize: 10, fontWeight: FontWeight.bold)),
                   ],
                 ),
               ),
@@ -329,7 +326,7 @@ class _ForexTradingScreenState extends State<ForexTradingScreen> {
                 Expanded(
                   flex: 2,
                   child: _signals.isEmpty
-                      ? const Center(child: Text('Analyzing market cycles...', style: TextStyle(color: Colors.grey, fontSize: 12)))
+                      ? const Center(child: Text('Analyzing 1-Minute market cycles...', style: TextStyle(color: Colors.grey, fontSize: 12)))
                       : ListView.builder(
                           itemCount: _signals.length,
                           itemBuilder: (context, index) {
