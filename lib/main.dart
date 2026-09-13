@@ -58,9 +58,8 @@ class _NativeTradingScreenState extends State<NativeTradingScreen> {
   double _tradeAmount = 50.0;
   double _balance = 1000.0;
 
-  double _zoomLevel = 1.0;
-  double _panOffset = 0.0;
   Timer? _tickTimer;
+  DateTime _lastCandleTime = DateTime.now();
 
   @override
   void initState() {
@@ -72,33 +71,34 @@ class _NativeTradingScreenState extends State<NativeTradingScreen> {
   void _initCandles() {
     _candles.clear();
     DateTime now = DateTime.now();
-    double price = _currentPrice;
+    double price = 1.08500;
     final rand = Random();
 
-    for (int i = 40; i >= 0; i--) {
+    for (int i = 30; i >= 0; i--) {
       double open = price;
-      double close = open + (rand.nextDouble() - 0.49) * 0.0006;
+      double close = open + (rand.nextDouble() - 0.49) * 0.0004;
       double high = max(open, close) + rand.nextDouble() * 0.0002;
       double low = min(open, close) - rand.nextDouble() * 0.0002;
       _candles.add(Candle(
         open: open, high: high, low: low, close: close,
-        timestamp: now.subtract(Duration(seconds: i * 3))
+        timestamp: now.subtract(Duration(seconds: i * 2))
       ));
       price = close;
     }
     _currentPrice = price;
+    _lastCandleTime = DateTime.now();
   }
 
   void _startLivePriceEngine() {
     _tickTimer?.cancel();
     final rand = Random();
     
-    // التحديث السريع جداً كل 200 ميلي ثانية لتحريك الشموع مثل Pocket Option تماماً
-    _tickTimer = Timer.periodic(const Duration(milliseconds: 200), (t) {
+    // تحديث سريع جداً كل 100 ميلي ثانية لإجبار النقطة والشموع على الحركة مستمرة
+    _tickTimer = Timer.periodic(const Duration(milliseconds: 100), (t) {
       if (!mounted) return;
       
       setState(() {
-        double delta = (rand.nextDouble() - 0.495) * 0.00015;
+        double delta = (rand.nextDouble() - 0.495) * 0.00012;
         _currentPrice = double.parse((_currentPrice + delta).toStringAsFixed(5));
 
         if (_candles.isNotEmpty) {
@@ -107,8 +107,8 @@ class _NativeTradingScreenState extends State<NativeTradingScreen> {
           if (_currentPrice > last.high) last.high = _currentPrice;
           if (_currentPrice < last.low) last.low = _currentPrice;
 
-          // إنشاء شمعة جديدة كل 3 ثوانٍ
-          if (DateTime.now().difference(last.timestamp).inSeconds >= 3) {
+          // إضافة شمعة جديدة كل ثانيتين
+          if (DateTime.now().difference(_lastCandleTime).inSeconds >= 2) {
             _candles.add(Candle(
               open: _currentPrice,
               high: _currentPrice,
@@ -116,7 +116,8 @@ class _NativeTradingScreenState extends State<NativeTradingScreen> {
               close: _currentPrice,
               timestamp: DateTime.now(),
             ));
-            if (_candles.length > 60) _candles.removeAt(0);
+            _lastCandleTime = DateTime.now();
+            if (_candles.length > 40) _candles.removeAt(0);
           }
         }
       });
@@ -223,26 +224,16 @@ class _NativeTradingScreenState extends State<NativeTradingScreen> {
             ),
           ),
           Expanded(
-            child: GestureDetector(
-              onScaleUpdate: (details) {
-                setState(() {
-                  _zoomLevel = (_zoomLevel * details.scale).clamp(0.5, 3.0);
-                  _panOffset += details.focalPointDelta.dx;
-                });
-              },
-              child: Container(
-                margin: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF0E1117),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: Colors.white10),
-                ),
-                child: ClipRect(
-                  child: CustomPaint(
-                    size: Size.infinite,
-                    painter: PocketChartPainter(_candles, _currentPrice, _zoomLevel, _panOffset),
-                  ),
-                ),
+            child: Container(
+              margin: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0E1117),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.white10),
+              ),
+              child: CustomPaint(
+                size: Size.infinite,
+                painter: PocketChartPainter(_candles, _currentPrice),
               ),
             ),
           ),
@@ -339,10 +330,8 @@ class _NativeTradingScreenState extends State<NativeTradingScreen> {
 class PocketChartPainter extends CustomPainter {
   final List<Candle> candles;
   final double currentPrice;
-  final double zoom;
-  final double pan;
 
-  PocketChartPainter(this.candles, this.currentPrice, this.zoom, this.pan);
+  PocketChartPainter(this.candles, this.currentPrice);
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -350,46 +339,58 @@ class PocketChartPainter extends CustomPainter {
 
     double maxH = candles.map((c) => c.high).reduce(max);
     double minL = candles.map((c) => c.low).reduce(min);
-    if (maxH == minL) maxH += 0.001;
+    if (maxH == minL) {
+      maxH += 0.0005;
+      minL -= 0.0005;
+    }
 
-    double baseWidth = (size.width / 25) * zoom;
+    double candleWidth = size.width / (candles.length + 2);
 
     for (int i = 0; i < candles.length; i++) {
       var c = candles[i];
       bool isGreen = c.close >= c.open;
-      Paint paint = Paint()
+      Paint candlePaint = Paint()
         ..color = isGreen ? const Color(0xFF00E676) : const Color(0xFFFF5252)
         ..strokeWidth = 1.5;
 
-      double x = size.width - ((candles.length - i) * baseWidth) + pan;
+      double x = (i + 1) * candleWidth;
 
-      if (x < -20 || x > size.width + 20) continue;
+      double highY = size.height - ((c.high - minL) / (maxH - minL) * (size.height - 60)) - 30;
+      double lowY = size.height - ((c.low - minL) / (maxH - minL) * (size.height - 60)) - 30;
+      double openY = size.height - ((c.open - minL) / (maxH - minL) * (size.height - 60)) - 30;
+      double closeY = size.height - ((c.close - minL) / (maxH - minL) * (size.height - 60)) - 30;
 
-      double highY = size.height - ((c.high - minL) / (maxH - minL) * (size.height - 40)) - 20;
-      double lowY = size.height - ((c.low - minL) / (maxH - minL) * (size.height - 40)) - 20;
-      double openY = size.height - ((c.open - minL) / (maxH - minL) * (size.height - 40)) - 20;
-      double closeY = size.height - ((c.close - minL) / (maxH - minL) * (size.height - 40)) - 20;
+      // رسم فتيل الشمعة
+      canvas.drawLine(Offset(x, highY), Offset(x, lowY), candlePaint);
 
-      canvas.drawLine(Offset(x, highY), Offset(x, lowY), paint);
-
+      // رسم جسم الشمعة
       double topY = min(openY, closeY);
       double bodyHeight = (openY - closeY).abs();
       if (bodyHeight < 2.0) bodyHeight = 2.0;
 
       canvas.drawRect(
-        Rect.fromLTWH(x - (baseWidth * 0.35), topY, baseWidth * 0.7, bodyHeight),
-        paint..style = PaintingStyle.fill,
+        Rect.fromLTWH(x - (candleWidth * 0.35), topY, candleWidth * 0.7, bodyHeight),
+        candlePaint..style = PaintingStyle.fill,
       );
     }
 
-    // رسم خط السعر المباشر
-    double lastY = size.height - ((currentPrice - minL) / (maxH - minL) * (size.height - 40)) - 20;
+    // رسم السعر والنقطة المتحركة المباشرة
+    double lastY = size.height - ((currentPrice - minL) / (maxH - minL) * (size.height - 60)) - 30;
+    
+    // خط السعر الأفقي
     Paint linePaint = Paint()
-      ..color = Colors.cyanAccent
-      ..strokeWidth = 1.2
+      ..color = Colors.cyanAccent.withOpacity(0.6)
+      ..strokeWidth = 1
       ..style = PaintingStyle.stroke;
-
     canvas.drawLine(Offset(0, lastY), Offset(size.width, lastY), linePaint);
+
+    // النقطة المباشرة المضيئة في آخر السعر
+    Paint dotPaint = Paint()..color = Colors.cyanAccent;
+    Paint dotGlow = Paint()..color = Colors.cyanAccent.withOpacity(0.3);
+    
+    double lastX = candles.length * candleWidth;
+    canvas.drawCircle(Offset(lastX, lastY), 8, dotGlow);
+    canvas.drawCircle(Offset(lastX, lastY), 4, dotPaint);
   }
 
   @override
