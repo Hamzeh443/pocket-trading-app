@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
-import 'package:web_socket_channel/web_socket_channel.dart';
 
 void main() {
   runApp(const PocketTradingApp());
@@ -58,10 +58,10 @@ class _ProDashboardScreenState extends State<ProDashboardScreen> {
   double _rsi = 50.0;
   
   String _activeSignal = 'NONE';
-  int _timeframeSeconds = 60; // 1M Candle
+  int _timeframeSeconds = 60;
   int _candleSecondsLeft = 60;
   
-  WebSocketChannel? _channel;
+  WebSocket? _socket;
   StreamSubscription? _socketSubscription;
   Timer? _timer;
 
@@ -71,24 +71,20 @@ class _ProDashboardScreenState extends State<ProDashboardScreen> {
     _connectToLiveWebSocket();
   }
 
-  void _connectToLiveWebSocket() {
+  Future<void> _connectToLiveWebSocket() async {
     try {
-      _socketSubscription?.cancel();
-      _channel?.sink.close();
+      await _socketSubscription?.cancel();
+      await _socket?.close();
 
-      // Connecting to real-time Forex/Crypto market WebSocket feed
-      _channel = WebSocketChannel.connect(
-        Uri.parse('wss://ws.binaryws.com/websockets/v3?app_id=1089'),
-      );
+      _socket = await WebSocket.connect('wss://ws.binaryws.com/websockets/v3?app_id=1089');
 
-      // Subscribe to live tick stream for selected pair
       String symbol = _getSymbolCode(_selectedPair);
-      _channel?.sink.add(jsonEncode({
+      _socket?.add(jsonEncode({
         "ticks": symbol,
         "subscribe": 1
       }));
 
-      _socketSubscription = _channel?.stream.listen((message) {
+      _socketSubscription = _socket?.listen((message) {
         var data = jsonDecode(message);
         if (data['tick'] != null) {
           double price = (data['tick']['quote'] as num).toDouble();
@@ -145,7 +141,6 @@ class _ProDashboardScreenState extends State<ProDashboardScreen> {
           _closePrices.add(_currentPrice);
           if (_closePrices.length > 30) _closePrices.removeAt(0);
 
-          // Close current candle & Open new candle
           _candles.add(Candle(
             open: _currentPrice,
             high: _currentPrice,
@@ -200,7 +195,7 @@ class _ProDashboardScreenState extends State<ProDashboardScreen> {
   @override
   void dispose() {
     _socketSubscription?.cancel();
-    _channel?.sink.close();
+    _socket?.close();
     _timer?.cancel();
     super.dispose();
   }
