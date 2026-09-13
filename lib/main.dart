@@ -81,7 +81,7 @@ class _MainTradingScreenState extends State<MainTradingScreen> {
   double _rsi = 50.0;
   bool _isBotActive = false;
   
-  int _selectedDuration = 60; // 1m default
+  int _selectedDuration = 60;
   double _tradeAmount = 50.0;
   double _balance = 1000.0;
 
@@ -217,7 +217,7 @@ class _MainTradingScreenState extends State<MainTradingScreen> {
                 : _currentPrice < trade.entryPrice;
             
             trade.status = isWin ? 'WIN' : 'LOSS';
-            if (isWin) _balance += trade.amount * 1.92; // 92% Payout
+            if (isWin) _balance += trade.amount * 1.92;
             
             _tradeHistory.insert(0, trade);
             _activeTrades.removeAt(i);
@@ -279,7 +279,6 @@ class _MainTradingScreenState extends State<MainTradingScreen> {
       ),
       body: Column(
         children: [
-          // Top Control Panel: RSI & Bot Switch
           Container(
             color: const Color(0xFF161B22),
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -308,8 +307,6 @@ class _MainTradingScreenState extends State<MainTradingScreen> {
               ],
             ),
           ),
-
-          // Interactive Chart Container with Pinch-to-Zoom & Pan
           Expanded(
             child: GestureDetector(
               onScaleUpdate: (details) {
@@ -334,8 +331,6 @@ class _MainTradingScreenState extends State<MainTradingScreen> {
               ),
             ),
           ),
-
-          // Bottom Trading Control Panel
           Container(
             padding: const EdgeInsets.all(12),
             decoration: const BoxDecoration(
@@ -371,7 +366,7 @@ class _MainTradingScreenState extends State<MainTradingScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text('AMOUNT ($)', style: TextStyle(color: Colors.grey, fontSize: 11)),
+                          const Text('AMOUNT USD', style: TextStyle(color: Colors.grey, fontSize: 11)),
                           DropdownButton<double>(
                             isExpanded: true,
                             value: _tradeAmount,
@@ -460,10 +455,8 @@ class PocketChartPainter extends CustomPainter {
       double openY = size.height - ((c.open - minL) / (maxH - minL) * (size.height - 40)) - 20;
       double closeY = size.height - ((c.close - minL) / (maxH - minL) * (size.height - 40)) - 20;
 
-      // Draw Wick
       canvas.drawLine(Offset(x, highY), Offset(x, lowY), paint);
 
-      // Draw Body
       double topY = min(openY, closeY);
       double bodyHeight = (openY - closeY).abs();
       if (bodyHeight < 1.5) bodyHeight = 1.5;
@@ -474,7 +467,6 @@ class PocketChartPainter extends CustomPainter {
       );
     }
 
-    // Current Price Line
     double lastY = size.height - ((currentPrice - minL) / (maxH - minL) * (size.height - 40)) - 20;
     Paint linePaint = Paint()
       ..color = Colors.blueAccent
