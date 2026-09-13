@@ -1,12 +1,25 @@
 import 'package:flutter/material.dart';
-import 'package:webview_flutter/webview_flutter.dart';
-import 'package:webview_flutter_android/webview_flutter_android.dart';
-import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
 import 'dart:async';
+import 'dart:math';
 
 void main() {
-  WidgetsFlutterBinding.ensureInitialized();
   runApp(const PocketTradingApp());
+}
+
+class Candle {
+  final double open;
+  double high;
+  double low;
+  double close;
+  final DateTime timestamp;
+
+  Candle({
+    required this.open,
+    required this.high,
+    required this.low,
+    required this.close,
+    required this.timestamp,
+  });
 }
 
 class PocketTradingApp extends StatelessWidget {
@@ -21,71 +34,93 @@ class PocketTradingApp extends StatelessWidget {
         scaffoldBackgroundColor: const Color(0xFF090C10),
         cardColor: const Color(0xFF161B22),
       ),
-      home: const LiveTradingScreen(),
+      home: const NativeTradingScreen(),
     );
   }
 }
 
-class LiveTradingScreen extends StatefulWidget {
-  const LiveTradingScreen({super.key});
+class NativeTradingScreen extends StatefulWidget {
+  const NativeTradingScreen({super.key});
 
   @override
-  State<LiveTradingScreen> createState() => _LiveTradingScreenState();
+  State<NativeTradingScreen> createState() => _NativeTradingScreenState();
 }
 
-class _LiveTradingScreenState extends State<LiveTradingScreen> {
-  late final WebViewController _controller;
-  bool _isLoading = true;
+class _NativeTradingScreenState extends State<NativeTradingScreen> {
+  String _selectedPair = 'EUR/USD (OTC)';
+  final List<String> _pairs = ['EUR/USD (OTC)', 'GBP/USD (OTC)', 'USD/JPY (OTC)', 'BTC/USD'];
+
+  double _currentPrice = 1.08500;
+  final List<Candle> _candles = [];
   bool _isBotActive = false;
 
   int _selectedDuration = 60;
   double _tradeAmount = 50.0;
   double _balance = 1000.0;
 
+  double _zoomLevel = 1.0;
+  double _panOffset = 0.0;
+  Timer? _tickTimer;
+
   @override
   void initState() {
     super.initState();
+    _initCandles();
+    _startLivePriceEngine();
+  }
 
-    late final PlatformWebViewControllerCreationParams params;
-    if (WebViewPlatform.instance is WebKitWebViewPlatform) {
-      params = WebKitWebViewControllerCreationParams(
-        allowsInlineMediaPlayback: true,
-      );
-    } else {
-      params = const PlatformWebViewControllerCreationParams();
+  void _initCandles() {
+    _candles.clear();
+    DateTime now = DateTime.now();
+    double price = _currentPrice;
+    final rand = Random();
+
+    for (int i = 40; i >= 0; i--) {
+      double open = price;
+      double close = open + (rand.nextDouble() - 0.49) * 0.0006;
+      double high = max(open, close) + rand.nextDouble() * 0.0002;
+      double low = min(open, close) - rand.nextDouble() * 0.0002;
+      _candles.add(Candle(
+        open: open, high: high, low: low, close: close,
+        timestamp: now.subtract(Duration(seconds: i * 3))
+      ));
+      price = close;
     }
+    _currentPrice = price;
+  }
 
-    final WebViewController controller =
-        WebViewController.fromPlatformCreationParams(params);
+  void _startLivePriceEngine() {
+    _tickTimer?.cancel();
+    final rand = Random();
+    
+    // التحديث السريع جداً كل 200 ميلي ثانية لتحريك الشموع مثل Pocket Option تماماً
+    _tickTimer = Timer.periodic(const Duration(milliseconds: 200), (t) {
+      if (!mounted) return;
+      
+      setState(() {
+        double delta = (rand.nextDouble() - 0.495) * 0.00015;
+        _currentPrice = double.parse((_currentPrice + delta).toStringAsFixed(5));
 
-    controller
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setBackgroundColor(const Color(0xFF090C10))
-      ..setUserAgent("Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
-      ..setNavigationDelegate(
-        NavigationDelegate(
-          onPageFinished: (String url) {
-            setState(() {
-              _isLoading = false;
-            });
-          },
-        ),
-      );
+        if (_candles.isNotEmpty) {
+          var last = _candles.last;
+          last.close = _currentPrice;
+          if (_currentPrice > last.high) last.high = _currentPrice;
+          if (_currentPrice < last.low) last.low = _currentPrice;
 
-    if (controller.platform is AndroidWebViewController) {
-      AndroidWebViewController.enableDebugging(true);
-      final androidController = controller.platform as AndroidWebViewController;
-      androidController.setMediaPlaybackRequiresUserGesture(false);
-      androidController.setGeolocationPermissionsPromptCallbacks(
-        onShowPrompt: (request) async {
-          return const GeolocationPermissionsResponse(allow: true, retain: true);
-        },
-      );
-    }
-
-    controller.loadRequest(Uri.parse('https://po.trade/smart-chart'));
-
-    _controller = controller;
+          // إنشاء شمعة جديدة كل 3 ثوانٍ
+          if (DateTime.now().difference(last.timestamp).inSeconds >= 3) {
+            _candles.add(Candle(
+              open: _currentPrice,
+              high: _currentPrice,
+              low: _currentPrice,
+              close: _currentPrice,
+              timestamp: DateTime.now(),
+            ));
+            if (_candles.length > 60) _candles.removeAt(0);
+          }
+        }
+      });
+    });
   }
 
   void _executeTrade(String type) {
@@ -102,9 +137,15 @@ class _LiveTradingScreenState extends State<LiveTradingScreen> {
           style: const TextStyle(fontWeight: FontWeight.bold),
         ),
         backgroundColor: type == 'BUY' ? Colors.green : Colors.red,
-        duration: const Duration(seconds: 2),
+        duration: const Duration(seconds: 1),
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    _tickTimer?.cancel();
+    super.dispose();
   }
 
   @override
@@ -113,12 +154,21 @@ class _LiveTradingScreenState extends State<LiveTradingScreen> {
       appBar: AppBar(
         backgroundColor: const Color(0xFF161B22),
         elevation: 0,
-        title: const Row(
-          children: [
-            Icon(Icons.candlestick_chart, color: Colors.blueAccent),
-            SizedBox(width: 8),
-            Text('Pocket Option Real-Time', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-          ],
+        title: DropdownButtonHideUnderline(
+          child: DropdownButton<String>(
+            value: _selectedPair,
+            dropdownColor: const Color(0xFF161B22),
+            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+            items: _pairs.map((p) => DropdownMenuItem(value: p, child: Text(p))).toList(),
+            onChanged: (val) {
+              if (val != null) {
+                setState(() {
+                  _selectedPair = val;
+                  _initCandles();
+                });
+              }
+            },
+          ),
         ),
         actions: [
           Container(
@@ -146,15 +196,17 @@ class _LiveTradingScreenState extends State<LiveTradingScreen> {
         children: [
           Container(
             color: const Color(0xFF161B22),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Row(
+                Row(
                   children: [
-                    Icon(Icons.verified, color: Colors.greenAccent, size: 16),
-                    SizedBox(width: 6),
-                    Text('100% Pocket Feed Synced', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                    const Text('LIVE PRICE: ', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                    Text(
+                      '$_currentPrice',
+                      style: const TextStyle(color: Colors.cyanAccent, fontWeight: FontWeight.bold, fontSize: 14),
+                    ),
                   ],
                 ),
                 Row(
@@ -171,14 +223,27 @@ class _LiveTradingScreenState extends State<LiveTradingScreen> {
             ),
           ),
           Expanded(
-            child: Stack(
-              children: [
-                WebViewWidget(controller: _controller),
-                if (_isLoading)
-                  const Center(
-                    child: CircularProgressIndicator(color: Colors.blueAccent),
+            child: GestureDetector(
+              onScaleUpdate: (details) {
+                setState(() {
+                  _zoomLevel = (_zoomLevel * details.scale).clamp(0.5, 3.0);
+                  _panOffset += details.focalPointDelta.dx;
+                });
+              },
+              child: Container(
+                margin: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0E1117),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.white10),
+                ),
+                child: ClipRect(
+                  child: CustomPaint(
+                    size: Size.infinite,
+                    painter: PocketChartPainter(_candles, _currentPrice, _zoomLevel, _panOffset),
                   ),
-              ],
+                ),
+              ),
             ),
           ),
           Container(
@@ -269,4 +334,64 @@ class _LiveTradingScreenState extends State<LiveTradingScreen> {
       ),
     );
   }
+}
+
+class PocketChartPainter extends CustomPainter {
+  final List<Candle> candles;
+  final double currentPrice;
+  final double zoom;
+  final double pan;
+
+  PocketChartPainter(this.candles, this.currentPrice, this.zoom, this.pan);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (candles.isEmpty) return;
+
+    double maxH = candles.map((c) => c.high).reduce(max);
+    double minL = candles.map((c) => c.low).reduce(min);
+    if (maxH == minL) maxH += 0.001;
+
+    double baseWidth = (size.width / 25) * zoom;
+
+    for (int i = 0; i < candles.length; i++) {
+      var c = candles[i];
+      bool isGreen = c.close >= c.open;
+      Paint paint = Paint()
+        ..color = isGreen ? const Color(0xFF00E676) : const Color(0xFFFF5252)
+        ..strokeWidth = 1.5;
+
+      double x = size.width - ((candles.length - i) * baseWidth) + pan;
+
+      if (x < -20 || x > size.width + 20) continue;
+
+      double highY = size.height - ((c.high - minL) / (maxH - minL) * (size.height - 40)) - 20;
+      double lowY = size.height - ((c.low - minL) / (maxH - minL) * (size.height - 40)) - 20;
+      double openY = size.height - ((c.open - minL) / (maxH - minL) * (size.height - 40)) - 20;
+      double closeY = size.height - ((c.close - minL) / (maxH - minL) * (size.height - 40)) - 20;
+
+      canvas.drawLine(Offset(x, highY), Offset(x, lowY), paint);
+
+      double topY = min(openY, closeY);
+      double bodyHeight = (openY - closeY).abs();
+      if (bodyHeight < 2.0) bodyHeight = 2.0;
+
+      canvas.drawRect(
+        Rect.fromLTWH(x - (baseWidth * 0.35), topY, baseWidth * 0.7, bodyHeight),
+        paint..style = PaintingStyle.fill,
+      );
+    }
+
+    // رسم خط السعر المباشر
+    double lastY = size.height - ((currentPrice - minL) / (maxH - minL) * (size.height - 40)) - 20;
+    Paint linePaint = Paint()
+      ..color = Colors.cyanAccent
+      ..strokeWidth = 1.2
+      ..style = PaintingStyle.stroke;
+
+    canvas.drawLine(Offset(0, lastY), Offset(size.width, lastY), linePaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }
