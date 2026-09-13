@@ -69,18 +69,21 @@ class _LiveTradingScreenState extends State<LiveTradingScreen> {
               _isLoading = false;
             });
           },
-          onWebResourceError: (WebResourceError error) {
-            debugPrint('Page error: ${error.description}');
-          },
         ),
-      )
-      ..loadRequest(Uri.parse('https://pocketoption.com/en/cabinet/demo-quick-high-low'));
+      );
 
     if (controller.platform is AndroidWebViewController) {
       AndroidWebViewController.enableDebugging(true);
-      (controller.platform as AndroidWebViewController)
-          .setMediaPlaybackRequiresUserGesture(false);
+      final androidController = controller.platform as AndroidWebViewController;
+      androidController.setMediaPlaybackRequiresUserGesture(false);
+      androidController.setGeolocationPermissionsPromptCallbacks(
+        onShowPrompt: (request) async {
+          return const GeolocationPermissionsResponse(allow: true, retain: true);
+        },
+      );
     }
+
+    controller.loadRequest(Uri.parse('https://po.trade/smart-chart'));
 
     _controller = controller;
   }
