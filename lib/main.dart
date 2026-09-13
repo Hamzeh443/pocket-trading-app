@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:webview_flutter_android/webview_flutter_android.dart';
+import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
 import 'dart:async';
 
 void main() {
@@ -43,9 +45,23 @@ class _LiveTradingScreenState extends State<LiveTradingScreen> {
   @override
   void initState() {
     super.initState();
-    _controller = WebViewController()
+
+    late final PlatformWebViewControllerCreationParams params;
+    if (WebViewPlatform.instance is WebKitWebViewPlatform) {
+      params = WebKitWebViewControllerCreationParams(
+        allowsInlineMediaPlayback: true,
+      );
+    } else {
+      params = const PlatformWebViewControllerCreationParams();
+    }
+
+    final WebViewController controller =
+        WebViewController.fromPlatformCreationParams(params);
+
+    controller
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(const Color(0xFF090C10))
+      ..setUserAgent("Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
       ..setNavigationDelegate(
         NavigationDelegate(
           onPageFinished: (String url) {
@@ -53,9 +69,20 @@ class _LiveTradingScreenState extends State<LiveTradingScreen> {
               _isLoading = false;
             });
           },
+          onWebResourceError: (WebResourceError error) {
+            debugPrint('Page error: ${error.description}');
+          },
         ),
       )
-      ..loadRequest(Uri.parse('https://po.trade/smart-chart'));
+      ..loadRequest(Uri.parse('https://pocketoption.com/en/cabinet/demo-quick-high-low'));
+
+    if (controller.platform is AndroidWebViewController) {
+      AndroidWebViewController.enableDebugging(true);
+      (controller.platform as AndroidWebViewController)
+          .setMediaPlaybackRequiresUserGesture(false);
+    }
+
+    _controller = controller;
   }
 
   void _executeTrade(String type) {
@@ -114,7 +141,6 @@ class _LiveTradingScreenState extends State<LiveTradingScreen> {
       ),
       body: Column(
         children: [
-          // Control Bar: AutoBot Switch
           Container(
             color: const Color(0xFF161B22),
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
@@ -141,8 +167,6 @@ class _LiveTradingScreenState extends State<LiveTradingScreen> {
               ],
             ),
           ),
-
-          // Live Chart Container
           Expanded(
             child: Stack(
               children: [
@@ -154,8 +178,6 @@ class _LiveTradingScreenState extends State<LiveTradingScreen> {
               ],
             ),
           ),
-
-          // Bottom Trading Action Panel
           Container(
             padding: const EdgeInsets.all(12),
             decoration: const BoxDecoration(
