@@ -1,11 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
 import 'dart:async';
 import 'dart:math';
 
 void main() {
-  runApp(const ForexTradingApp());
+  runApp(const PocketOptionApp());
 }
 
 class Candle {
@@ -24,112 +22,117 @@ class Candle {
   });
 }
 
-class Signal {
+class ActiveTrade {
   final String pair;
-  final String type;
-  final double accuracy;
-  final String timeframe;
-  final DateTime time;
+  final String type; // CALL or PUT
+  final double entryPrice;
+  final int amount;
+  int secondsLeft;
 
-  Signal({
+  ActiveTrade({
     required this.pair,
     required this.type,
-    required this.accuracy,
-    required this.timeframe,
-    required this.time,
+    required this.entryPrice,
+    required this.amount,
+    required this.secondsLeft,
   });
 }
 
-class ForexTradingApp extends StatelessWidget {
-  const ForexTradingApp({super.key});
+class PocketOptionApp extends StatelessWidget {
+  const PocketOptionApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Real Forex Signal Engine',
+      title: 'Pocket Option Simulator',
       debugShowCheckedModeBanner: false,
       theme: ThemeData.dark().copyWith(
-        scaffoldBackgroundColor: const Color(0xFF0D1117),
-        cardColor: const Color(0xFF161B22),
+        scaffoldBackgroundColor: const Color(0xFF090D14),
+        cardColor: const Color(0xFF131B26),
       ),
-      home: const ForexTradingScreen(),
+      home: const PocketDashboardScreen(),
     );
   }
 }
 
-class ForexTradingScreen extends StatefulWidget {
-  const ForexTradingScreen({super.key});
+class PocketDashboardScreen extends StatefulWidget {
+  const PocketDashboardScreen({super.key});
 
   @override
-  State<ForexTradingScreen> createState() => _ForexTradingScreenState();
+  State<PocketDashboardScreen> createState() => _PocketDashboardScreenState();
 }
 
-class _ForexTradingScreenState extends State<ForexTradingScreen> {
-  String _selectedPair = 'BTCUSDT';
-  final List<String> _pairs = ['BTCUSDT', 'ETHUSDT', 'EURUSDT', 'GBPUSDT'];
+class _PocketDashboardScreenState extends State<PocketDashboardScreen> {
+  String _selectedPair = 'EUR/USD (OTC)';
+  final List<String> _pairs = ['EUR/USD (OTC)', 'BTC/USDT', 'GBP/USD', 'ETH/USDT'];
 
-  double _currentPrice = 0.0;
+  double _currentPrice = 1.0850;
   List<Candle> _candles = [];
-  final List<Signal> _signals = [];
-
+  List<double> _emaValues = [];
   double _rsi = 50.0;
-  String _latestSignalText = "ANALYZING MARKET...";
-  Color _signalColor = Colors.orange;
+  
+  int _investment = 10;
+  double _balance = 10000.0;
+  bool _audioAlert = true;
 
-  Timer? _fetchTimer;
-  bool _isLoading = true;
+  String _signalText = "NEUTRAL / ANALYZING";
+  Color _signalColor = Colors.orangeAccent;
+
+  Timer? _marketTimer;
+  Timer? _tradeTimer;
+  List<ActiveTrade> _activeTrades = [];
 
   @override
   void initState() {
     super.initState();
-    _fetchRealMarketData();
-    _fetchTimer = Timer.periodic(const Duration(seconds: 2), (t) => _fetchRealMarketData());
+    _generateInitialCandles();
+    _startMarketEngine();
   }
 
-  Future<void> _fetchRealMarketData() async {
-    try {
-      final url = Uri.parse('https://api.binance.com/api/v3/klines?symbol=$_selectedPair&interval=1m&limit=30');
-      final response = await http.get(url).timeout(const Duration(seconds: 3));
+  void _generateInitialCandles() {
+    _candles.clear();
+    double price = _currentPrice;
+    DateTime now = DateTime.now().subtract(const Duration(minutes: 30));
 
-      if (response.statusCode == 200) {
-        List rawData = json.decode(response.body);
-        List<Candle> loadedCandles = [];
+    for (int i = 0; i < 30; i++) {
+      double change = (Random().nextDouble() - 0.49) * 0.0008;
+      double open = price;
+      double close = open + change;
+      double high = max(open, close) + Random().nextDouble() * 0.0003;
+      double low = min(open, close) - Random().nextDouble() * 0.0003;
 
-        for (var item in rawData) {
-          loadedCandles.add(Candle(
-            open: double.parse(item[1].toString()),
-            high: double.parse(item[2].toString()),
-            low: double.parse(item[3].toString()),
-            close: double.parse(item[4].toString()),
-            timestamp: DateTime.fromMillisecondsSinceEpoch(item[0]),
-          ));
-        }
-
-        if (mounted) {
-          setState(() {
-            _candles = loadedCandles;
-            _currentPrice = _candles.last.close;
-            _isLoading = false;
-            _calculateRSIAndSignals();
-          });
-        }
-      }
-    } catch (e) {
-      _updateLiveCandleTick();
+      _candles.add(Candle(
+        open: open,
+        high: high,
+        low: low,
+        close: close,
+        timestamp: now.add(Duration(minutes: i)),
+      ));
+      price = close;
     }
+    _currentPrice = price;
+    _recalculateIndicators();
   }
 
-  void _updateLiveCandleTick() {
+  void _startMarketEngine() {
+    _marketTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      _tickMarket();
+    });
+
+    _tradeTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      _tickTrades();
+    });
+  }
+
+  void _tickMarket() {
     if (_candles.isEmpty) return;
 
-    final rand = Random();
-    double change = (rand.nextDouble() - 0.495) * (_candles.last.close * 0.0003);
+    DateTime now = DateTime.now();
+    double change = (Random().nextDouble() - 0.495) * 0.0004;
     double newPrice = _candles.last.close + change;
 
-    DateTime now = DateTime.now();
     var lastCandle = _candles.last;
 
-    // فتح شمعة جديدة فقط عند انقضاء دقيقة كاملة (60 ثانية)
     if (now.difference(lastCandle.timestamp).inSeconds >= 60) {
       _candles.add(Candle(
         open: newPrice,
@@ -140,70 +143,94 @@ class _ForexTradingScreenState extends State<ForexTradingScreen> {
       ));
       if (_candles.length > 30) _candles.removeAt(0);
     } else {
-      // تحديث سعر الشمعة الحالية فقط دون إضافة شمعة جديدة
       lastCandle.close = newPrice;
       if (newPrice > lastCandle.high) lastCandle.high = newPrice;
       if (newPrice < lastCandle.low) lastCandle.low = newPrice;
     }
 
-    if (mounted) {
-      setState(() {
-        _currentPrice = newPrice;
-        _isLoading = false;
-        _calculateRSIAndSignals();
-      });
-    }
+    setState(() {
+      _currentPrice = newPrice;
+      _recalculateIndicators();
+    });
   }
 
-  void _calculateRSIAndSignals() {
+  void _recalculateIndicators() {
     if (_candles.length < 14) return;
 
+    // Calculate RSI (14)
     double gains = 0;
     double losses = 0;
     for (int i = _candles.length - 14; i < _candles.length; i++) {
       double diff = _candles[i].close - _candles[i - 1].close;
       if (diff >= 0) gains += diff; else losses -= diff;
     }
-
     double rs = losses == 0 ? 100 : gains / losses;
     _rsi = 100 - (100 / (1 + rs));
 
-    if (_rsi < 30) {
-      _latestSignalText = "STRONG BUY (CALL)";
+    // Calculate EMA (9)
+    double k = 2 / (9 + 1);
+    _emaValues.clear();
+    double ema = _candles.first.close;
+    _emaValues.add(ema);
+
+    for (int i = 1; i < _candles.length; i++) {
+      ema = (_candles[i].close * k) + (ema * (1 - k));
+      _emaValues.add(ema);
+    }
+
+    // Generate Signals
+    if (_rsi < 32) {
+      _signalText = "STRONG CALL (OVERSOLD)";
       _signalColor = Colors.greenAccent;
-      _addSignalIfNew("CALL");
-    } else if (_rsi > 70) {
-      _latestSignalText = "STRONG SELL (PUT)";
+    } else if (_rsi > 68) {
+      _signalText = "STRONG PUT (OVERBOUGHT)";
       _signalColor = Colors.redAccent;
-      _addSignalIfNew("PUT");
     } else {
-      _latestSignalText = "WAIT / NEUTRAL";
+      _signalText = "NEUTRAL / HOLD";
       _signalColor = Colors.orangeAccent;
     }
   }
 
-  void _addSignalIfNew(String type) {
-    if (_signals.isNotEmpty && _signals.first.type == type && 
-        DateTime.now().difference(_signals.first.time).inSeconds < 60) {
-      return;
-    }
+  void _executeTrade(String type) {
+    if (_balance < _investment) return;
 
-    final rand = Random();
-    double acc = 85.0 + rand.nextDouble() * 10.0;
+    setState(() {
+      _balance -= _investment;
+      _activeTrades.add(ActiveTrade(
+        pair: _selectedPair,
+        type: type,
+        entryPrice: _currentPrice,
+        amount: _investment,
+        secondsLeft: 60,
+      ));
+    });
+  }
 
-    _signals.insert(0, Signal(
-      pair: _selectedPair,
-      type: type,
-      accuracy: double.parse(acc.toStringAsFixed(1)),
-      timeframe: "1M",
-      time: DateTime.now(),
-    ));
-    if (_signals.length > 10) _signals.removeLast();
+  void _tickTrades() {
+    if (_activeTrades.isEmpty) return;
+
+    setState(() {
+      for (int i = _activeTrades.length - 1; i >= 0; i--) {
+        var trade = _activeTrades[i];
+        trade.secondsLeft--;
+
+        if (trade.secondsLeft <= 0) {
+          bool win = (trade.type == 'CALL' && _currentPrice > trade.entryPrice) ||
+                     (trade.type == 'PUT' && _currentPrice < trade.entryPrice);
+
+          if (win) {
+            _balance += trade.amount * 1.92;
+          }
+          _activeTrades.removeAt(i);
+        }
+      }
+    });
   }
 
   @override
   void dispose() {
-    _fetchTimer?.cancel();
+    _marketTimer?.cancel();
+    _tradeTimer?.cancel();
     super.dispose();
   }
 
@@ -211,185 +238,199 @@ class _ForexTradingScreenState extends State<ForexTradingScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: const Color(0xFF161B22),
+        backgroundColor: const Color(0xFF131B26),
         elevation: 0,
-        title: const Text('Real Forex Market Feed', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.blueAccent.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: const Text('DEMO', style: TextStyle(color: Colors.blueAccent, fontSize: 11, fontWeight: FontWeight.bold)),
+            ),
+            const SizedBox(width: 10),
+            Text('\$${_balance.toStringAsFixed(2)}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          ],
+        ),
         actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 12),
-            child: Center(
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.greenAccent.withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.greenAccent),
+          IconButton(
+            icon: Icon(_audioAlert ? Icons.volume_up : Icons.volume_off, color: _audioAlert ? Colors.greenAccent : Colors.grey),
+            onPressed: () => setState(() => _audioAlert = !_audioAlert),
+          )
+        ],
+      ),
+      body: Column(
+        children: [
+          // Pair Selector & Signal Header Bar
+          Container(
+            color: const Color(0xFF182230),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    value: _selectedPair,
+                    dropdownColor: const Color(0xFF182230),
+                    items: _pairs.map((p) => DropdownMenuItem(value: p, child: Text(p, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)))).toList(),
+                    onChanged: (v) {
+                      if (v != null) {
+                        setState(() {
+                          _selectedPair = v;
+                          _generateInitialCandles();
+                        });
+                      }
+                    },
+                  ),
                 ),
-                child: const Row(
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: _signalColor.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(color: _signalColor),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.bolt, color: Colors.yellowAccent, size: 14),
+                      const SizedBox(width: 4),
+                      Text(_signalText, style: TextStyle(color: _signalColor, fontSize: 10, fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // Main Chart Screen
+          Expanded(
+            child: Container(
+              margin: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: const Color(0xFF090D14),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.white10),
+              ),
+              child: CustomPaint(
+                size: Size.infinite,
+                painter: PocketChartPainter(_candles, _emaValues, _currentPrice),
+              ),
+            ),
+          ),
+
+          // Active Trades Panel
+          if (_activeTrades.isNotEmpty)
+            Container(
+              height: 50,
+              margin: const EdgeInsets.symmetric(horizontal: 8),
+              child: ListView.builder(
+                scrollDirection: Axis.horizontal,
+                itemCount: _activeTrades.length,
+                itemBuilder: (context, index) {
+                  var t = _activeTrades[index];
+                  return Container(
+                    margin: const EdgeInsets.only(right: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF131B26),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: t.type == 'CALL' ? Colors.greenAccent : Colors.redAccent),
+                    ),
+                    child: Row(
+                      children: [
+                        Text('${t.type} \$${t.amount}', style: TextStyle(color: t.type == 'CALL' ? Colors.greenAccent : Colors.redAccent, fontWeight: FontWeight.bold, fontSize: 12)),
+                        const SizedBox(width: 8),
+                        Text('${t.secondsLeft}s', style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+
+          // Control Dashboard
+          Container(
+            color: const Color(0xFF131B26),
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Icon(Icons.check_circle, color: Colors.greenAccent, size: 14),
-                    SizedBox(width: 4),
-                    Text('1M TIMEFRAME', style: TextStyle(color: Colors.greenAccent, fontSize: 10, fontWeight: FontWeight.bold)),
+                    Text('RSI (14): ${_rsi.toStringAsFixed(1)}', style: TextStyle(color: _signalColor, fontWeight: FontWeight.bold, fontSize: 12)),
+                    Row(
+                      children: [
+                        const Text('Investment: ', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                        IconButton(
+                          icon: const Icon(Icons.remove_circle_outline, size: 20),
+                          onPressed: () => setState(() => _investment = max(1, _investment - 5)),
+                        ),
+                        Text('\$$_investment', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                        IconButton(
+                          icon: const Icon(Icons.add_circle_outline, size: 20),
+                          onPressed: () => setState(() => _investment += 5),
+                        ),
+                      ],
+                    )
                   ],
                 ),
-              ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF00E676),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                        ),
+                        onPressed: () => _executeTrade('CALL'),
+                        child: const Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.arrow_upward, color: Colors.black, size: 20),
+                            SizedBox(width: 6),
+                            Text('HIGHER (CALL)', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFFFF5252),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                        ),
+                        onPressed: () => _executeTrade('PUT'),
+                        child: const Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.arrow_downward, color: Colors.white, size: 20),
+                            SizedBox(width: 6),
+                            Text('LOWER (PUT)', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                )
+              ],
             ),
           )
         ],
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator(color: Colors.cyanAccent))
-          : Column(
-              children: [
-                Container(
-                  margin: const EdgeInsets.all(10),
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF161B22),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: _signalColor.withOpacity(0.5), width: 1.5),
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('SIGNAL: $_selectedPair', style: const TextStyle(color: Colors.grey, fontSize: 11)),
-                          const SizedBox(height: 4),
-                          Text(
-                            _latestSignalText,
-                            style: TextStyle(color: _signalColor, fontSize: 16, fontWeight: FontWeight.bold),
-                          ),
-                        ],
-                      ),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          const Text('RSI (14)', style: TextStyle(color: Colors.grey, fontSize: 11)),
-                          const SizedBox(height: 4),
-                          Text(
-                            _rsi.toStringAsFixed(1),
-                            style: TextStyle(color: _signalColor, fontSize: 16, fontWeight: FontWeight.bold),
-                          ),
-                        ],
-                      )
-                    ],
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 10),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    decoration: BoxDecoration(color: const Color(0xFF161B22), borderRadius: BorderRadius.circular(8)),
-                    child: DropdownButtonHideUnderline(
-                      child: DropdownButton<String>(
-                        value: _selectedPair,
-                        isExpanded: true,
-                        dropdownColor: const Color(0xFF161B22),
-                        items: _pairs.map((p) => DropdownMenuItem(value: p, child: Text(p, style: const TextStyle(fontSize: 13)))).toList(),
-                        onChanged: (v) {
-                          if (v != null) {
-                            setState(() {
-                              _selectedPair = v;
-                              _isLoading = true;
-                            });
-                            _fetchRealMarketData();
-                          }
-                        },
-                      ),
-                    ),
-                  ),
-                ),
-                Expanded(
-                  flex: 2,
-                  child: Container(
-                    margin: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF090C10),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: Colors.white10),
-                    ),
-                    child: CustomPaint(
-                      size: Size.infinite,
-                      painter: RealChartPainter(_candles, _currentPrice),
-                    ),
-                  ),
-                ),
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text('LIVE SIGNALS', style: TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.bold)),
-                  ),
-                ),
-                Expanded(
-                  flex: 2,
-                  child: _signals.isEmpty
-                      ? const Center(child: Text('Analyzing 1-Minute market cycles...', style: TextStyle(color: Colors.grey, fontSize: 12)))
-                      : ListView.builder(
-                          itemCount: _signals.length,
-                          itemBuilder: (context, index) {
-                            final sig = _signals[index];
-                            bool isCall = sig.type == 'CALL';
-                            return Container(
-                              margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                              padding: const EdgeInsets.all(10),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF161B22),
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: isCall ? Colors.green.withOpacity(0.3) : Colors.red.withOpacity(0.3)),
-                              ),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Row(
-                                    children: [
-                                      Icon(
-                                        isCall ? Icons.arrow_upward : Icons.arrow_downward,
-                                        color: isCall ? Colors.greenAccent : Colors.redAccent,
-                                        size: 18,
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Text(
-                                        '${sig.pair} | ${sig.type}',
-                                        style: TextStyle(
-                                          color: isCall ? Colors.greenAccent : Colors.redAccent,
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 13,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  const Text('1 Minute', style: TextStyle(color: Colors.grey, fontSize: 11)),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                    decoration: BoxDecoration(
-                                      color: Colors.blueAccent.withOpacity(0.2),
-                                      borderRadius: BorderRadius.circular(4),
-                                    ),
-                                    child: Text(
-                                      'ACC: ${sig.accuracy}%',
-                                      style: const TextStyle(color: Colors.blueAccent, fontSize: 11, fontWeight: FontWeight.bold),
-                                    ),
-                                  )
-                                ],
-                              ),
-                            );
-                          },
-                        ),
-                ),
-              ],
-            ),
     );
   }
 }
 
-class RealChartPainter extends CustomPainter {
+class PocketChartPainter extends CustomPainter {
   final List<Candle> candles;
+  final List<double> ema;
   final double currentPrice;
 
-  RealChartPainter(this.candles, this.currentPrice);
+  PocketChartPainter(this.candles, this.ema, this.currentPrice);
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -397,31 +438,45 @@ class RealChartPainter extends CustomPainter {
 
     double maxH = candles.map((c) => c.high).reduce(max);
     double minL = candles.map((c) => c.low).reduce(min);
-    if (maxH == minL) {
-      maxH += 0.01;
-      minL -= 0.01;
-    }
+    if (maxH == minL) { maxH += 0.001; minL -= 0.001; }
 
     double w = size.width / (candles.length + 1);
 
+    // Draw Candlesticks
     for (int i = 0; i < candles.length; i++) {
       var c = candles[i];
       bool isGreen = c.close >= c.open;
       Paint p = Paint()
-        ..color = isGreen ? Colors.greenAccent : Colors.redAccent
+        ..color = isGreen ? const Color(0xFF00E676) : const Color(0xFFFF5252)
         ..strokeWidth = 1.2;
 
       double x = (i + 0.5) * w;
-      double hY = size.height - ((c.high - minL) / (maxH - minL) * (size.height - 30)) - 15;
-      double lY = size.height - ((c.low - minL) / (maxH - minL) * (size.height - 30)) - 15;
-      double oY = size.height - ((c.open - minL) / (maxH - minL) * (size.height - 30)) - 15;
-      double cY = size.height - ((c.close - minL) / (maxH - minL) * (size.height - 30)) - 15;
+      double hY = size.height - ((c.high - minL) / (maxH - minL) * (size.height - 40)) - 20;
+      double lY = size.height - ((c.low - minL) / (maxH - minL) * (size.height - 40)) - 20;
+      double oY = size.height - ((c.open - minL) / (maxH - minL) * (size.height - 40)) - 20;
+      double cY = size.height - ((c.close - minL) / (maxH - minL) * (size.height - 40)) - 20;
 
       canvas.drawLine(Offset(x, hY), Offset(x, lY), p);
       canvas.drawRect(
-        Rect.fromLTWH(x - (w * 0.3), min(oY, cY), w * 0.6, max((oY - cY).abs(), 1.5)),
+        Rect.fromLTWH(x - (w * 0.3), min(oY, cY), w * 0.6, max((oY - cY).abs(), 2.0)),
         p..style = PaintingStyle.fill,
       );
+    }
+
+    // Draw EMA 9 Yellow Line
+    if (ema.length == candles.length) {
+      Paint emaPaint = Paint()
+        ..color = Colors.amberAccent
+        ..strokeWidth = 2.0
+        ..style = PaintingStyle.stroke;
+
+      Path path = Path();
+      for (int i = 0; i < ema.length; i++) {
+        double x = (i + 0.5) * w;
+        double y = size.height - ((ema[i] - minL) / (maxH - minL) * (size.height - 40)) - 20;
+        if (i == 0) path.moveTo(x, y); else path.lineTo(x, y);
+      }
+      canvas.drawPath(path, emaPaint);
     }
   }
 
