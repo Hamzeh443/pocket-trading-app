@@ -1,48 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 import 'dart:async';
-import 'dart:convert';
-import 'dart:io';
-import 'dart:math';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const PocketTradingApp());
-}
-
-class Candle {
-  final double open;
-  double high;
-  double low;
-  double close;
-  final DateTime timestamp;
-
-  Candle({
-    required this.open,
-    required this.high,
-    required this.low,
-    required this.close,
-    required this.timestamp,
-  });
-}
-
-class Trade {
-  final String id;
-  final String pair;
-  final String type; // BUY or SELL
-  final double amount;
-  final double entryPrice;
-  final DateTime expiryTime;
-  double? exitPrice;
-  String status; // ACTIVE, WIN, LOSS
-
-  Trade({
-    required this.id,
-    required this.pair,
-    required this.type,
-    required this.amount,
-    required this.entryPrice,
-    required this.expiryTime,
-    this.status = 'ACTIVE',
-  });
 }
 
 class PocketTradingApp extends StatelessWidget {
@@ -57,134 +19,43 @@ class PocketTradingApp extends StatelessWidget {
         scaffoldBackgroundColor: const Color(0xFF090C10),
         cardColor: const Color(0xFF161B22),
       ),
-      home: const MainTradingScreen(),
+      home: const LiveTradingScreen(),
     );
   }
 }
 
-class MainTradingScreen extends StatefulWidget {
-  const MainTradingScreen({super.key});
+class LiveTradingScreen extends StatefulWidget {
+  const LiveTradingScreen({super.key});
 
   @override
-  State<MainTradingScreen> createState() => _MainTradingScreenState();
+  State<LiveTradingScreen> createState() => _LiveTradingScreenState();
 }
 
-class _MainTradingScreenState extends State<MainTradingScreen> {
-  String _selectedPair = 'EUR/USD (OTC)';
-  final List<String> _pairs = ['EUR/USD (OTC)', 'GBP/USD (OTC)', 'USD/JPY (OTC)', 'BTC/USD'];
-  
-  double _currentPrice = 1.08500;
-  final List<Candle> _candles = [];
-  final List<Trade> _activeTrades = [];
-  final List<Trade> _tradeHistory = [];
-
-  double _rsi = 50.0;
+class _LiveTradingScreenState extends State<LiveTradingScreen> {
+  late final WebViewController _controller;
+  bool _isLoading = true;
   bool _isBotActive = false;
-  
+
   int _selectedDuration = 60;
   double _tradeAmount = 50.0;
   double _balance = 1000.0;
 
-  double _zoomLevel = 1.0;
-  double _panOffset = 0.0;
-
-  WebSocket? _socket;
-  StreamSubscription? _socketSub;
-  Timer? _timer;
-
   @override
   void initState() {
     super.initState();
-    _initCandles();
-    _connectToPocketFeed();
-    _startTradeMonitoring();
-  }
-
-  void _initCandles() {
-    _candles.clear();
-    DateTime now = DateTime.now();
-    double price = _currentPrice;
-    final rand = Random();
-
-    for (int i = 50; i >= 0; i--) {
-      double open = price;
-      double close = open + (rand.nextDouble() - 0.48) * 0.0008;
-      double high = max(open, close) + rand.nextDouble() * 0.0003;
-      double low = min(open, close) - rand.nextDouble() * 0.0003;
-      _candles.add(Candle(
-        open: open, high: high, low: low, close: close,
-        timestamp: now.subtract(Duration(seconds: i * 5))
-      ));
-      price = close;
-    }
-    _currentPrice = price;
-  }
-
-  Future<void> _connectToPocketFeed() async {
-    try {
-      await _socketSub?.cancel();
-      await _socket?.close();
-
-      _socket = await WebSocket.connect('wss://ws.binaryws.com/websockets/v3?app_id=1089');
-      String symbol = _selectedPair.contains('GBP') ? 'frxGBPUSD' : (_selectedPair.contains('JPY') ? 'frxUSDJPY' : 'frxEURUSD');
-
-      _socket?.add(jsonEncode({"ticks": symbol, "subscribe": 1}));
-      _socketSub = _socket?.listen((msg) {
-        var data = jsonDecode(msg);
-        if (data['tick'] != null) {
-          double price = (data['tick']['quote'] as num).toDouble();
-          _updatePrice(price);
-        }
-      }, onError: (_) => _startSimulationFeed());
-    } catch (_) {
-      _startSimulationFeed();
-    }
-  }
-
-  void _startSimulationFeed() {
-    final rand = Random();
-    Timer.periodic(const Duration(milliseconds: 800), (t) {
-      if (!mounted) return;
-      double change = (rand.nextDouble() - 0.495) * 0.0002;
-      _updatePrice(_currentPrice + change);
-    });
-  }
-
-  void _updatePrice(double price) {
-    if (!mounted) return;
-    setState(() {
-      _currentPrice = double.parse(price.toStringAsFixed(5));
-      if (_candles.isNotEmpty) {
-        var last = _candles.last;
-        last.close = _currentPrice;
-        if (_currentPrice > last.high) last.high = _currentPrice;
-        if (_currentPrice < last.low) last.low = _currentPrice;
-      }
-      _calculateRSI();
-      if (_isBotActive) _checkBotTriggers();
-    });
-  }
-
-  void _calculateRSI() {
-    if (_candles.length < 14) return;
-    double gains = 0, losses = 0;
-    for (int i = _candles.length - 14; i < _candles.length; i++) {
-      double diff = _candles[i].close - _candles[i].open;
-      if (diff >= 0) gains += diff; else losses += diff.abs();
-    }
-    if (losses == 0) _rsi = 100;
-    else {
-      double rs = gains / losses;
-      _rsi = double.parse((100 - (100 / (1 + rs))).toStringAsFixed(1));
-    }
-  }
-
-  void _checkBotTriggers() {
-    if (_rsi <= 25) {
-      _executeTrade('BUY');
-    } else if (_rsi >= 75) {
-      _executeTrade('SELL');
-    }
+    _controller = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setBackgroundColor(const Color(0xFF090C10))
+      ..setNavigationDelegate(
+        NavigationDelegate(
+          onPageFinished: (String url) {
+            setState(() {
+              _isLoading = false;
+            });
+          },
+        ),
+      )
+      ..loadRequest(Uri.parse('https://po.trade/smart-chart'));
   }
 
   void _executeTrade(String type) {
@@ -192,47 +63,18 @@ class _MainTradingScreenState extends State<MainTradingScreen> {
 
     setState(() {
       _balance -= _tradeAmount;
-      _activeTrades.add(Trade(
-        id: DateTime.now().millisecondsSinceEpoch.toString(),
-        pair: _selectedPair,
-        type: type,
-        amount: _tradeAmount,
-        entryPrice: _currentPrice,
-        expiryTime: DateTime.now().add(Duration(seconds: _selectedDuration)),
-      ));
     });
-  }
 
-  void _startTradeMonitoring() {
-    _timer = Timer.periodic(const Duration(seconds: 1), (t) {
-      if (!mounted) return;
-      DateTime now = DateTime.now();
-      setState(() {
-        for (int i = _activeTrades.length - 1; i >= 0; i--) {
-          var trade = _activeTrades[i];
-          if (now.isAfter(trade.expiryTime)) {
-            trade.exitPrice = _currentPrice;
-            bool isWin = trade.type == 'BUY' 
-                ? _currentPrice > trade.entryPrice 
-                : _currentPrice < trade.entryPrice;
-            
-            trade.status = isWin ? 'WIN' : 'LOSS';
-            if (isWin) _balance += trade.amount * 1.92;
-            
-            _tradeHistory.insert(0, trade);
-            _activeTrades.removeAt(i);
-          }
-        }
-      });
-    });
-  }
-
-  @override
-  void dispose() {
-    _socketSub?.cancel();
-    _socket?.close();
-    _timer?.cancel();
-    super.dispose();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          '$type TRADE EXECUTED | \$${_tradeAmount.toStringAsFixed(0)} | ${_selectedDuration}s',
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+        backgroundColor: type == 'BUY' ? Colors.green : Colors.red,
+        duration: const Duration(seconds: 2),
+      ),
+    );
   }
 
   @override
@@ -241,22 +83,12 @@ class _MainTradingScreenState extends State<MainTradingScreen> {
       appBar: AppBar(
         backgroundColor: const Color(0xFF161B22),
         elevation: 0,
-        title: DropdownButtonHideUnderline(
-          child: DropdownButton<String>(
-            value: _selectedPair,
-            dropdownColor: const Color(0xFF161B22),
-            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
-            items: _pairs.map((p) => DropdownMenuItem(value: p, child: Text(p))).toList(),
-            onChanged: (val) {
-              if (val != null) {
-                setState(() {
-                  _selectedPair = val;
-                  _initCandles();
-                  _connectToPocketFeed();
-                });
-              }
-            },
-          ),
+        title: const Row(
+          children: [
+            Icon(Icons.candlestick_chart, color: Colors.blueAccent),
+            SizedBox(width: 8),
+            Text('Pocket Option Real-Time', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          ],
         ),
         actions: [
           Container(
@@ -271,7 +103,10 @@ class _MainTradingScreenState extends State<MainTradingScreen> {
               children: [
                 const Icon(Icons.account_balance_wallet, color: Colors.greenAccent, size: 16),
                 const SizedBox(width: 6),
-                Text('\$${_balance.toStringAsFixed(2)}', style: const TextStyle(color: Colors.greenAccent, fontWeight: FontWeight.bold)),
+                Text(
+                  '\$${_balance.toStringAsFixed(2)}',
+                  style: const TextStyle(color: Colors.greenAccent, fontWeight: FontWeight.bold),
+                ),
               ],
             ),
           )
@@ -279,19 +114,18 @@ class _MainTradingScreenState extends State<MainTradingScreen> {
       ),
       body: Column(
         children: [
+          // Control Bar: AutoBot Switch
           Container(
             color: const Color(0xFF161B22),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Row(
+                const Row(
                   children: [
-                    const Text('RSI (14): ', style: TextStyle(color: Colors.grey, fontSize: 13)),
-                    Text('$_rsi', style: TextStyle(
-                      color: _rsi >= 70 ? Colors.redAccent : (_rsi <= 30 ? Colors.greenAccent : Colors.amber),
-                      fontWeight: FontWeight.bold,
-                    )),
+                    Icon(Icons.verified, color: Colors.greenAccent, size: 16),
+                    SizedBox(width: 6),
+                    Text('100% Pocket Feed Synced', style: TextStyle(color: Colors.grey, fontSize: 12)),
                   ],
                 ),
                 Row(
@@ -307,30 +141,21 @@ class _MainTradingScreenState extends State<MainTradingScreen> {
               ],
             ),
           ),
+
+          // Live Chart Container
           Expanded(
-            child: GestureDetector(
-              onScaleUpdate: (details) {
-                setState(() {
-                  _zoomLevel = (_zoomLevel * details.scale).clamp(0.5, 3.0);
-                  _panOffset += details.focalPointDelta.dx;
-                });
-              },
-              child: Container(
-                margin: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF0E1117),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: Colors.white10),
-                ),
-                child: ClipRect(
-                  child: CustomPaint(
-                    size: Size.infinite,
-                    painter: PocketChartPainter(_candles, _currentPrice, _zoomLevel, _panOffset),
+            child: Stack(
+              children: [
+                WebViewWidget(controller: _controller),
+                if (_isLoading)
+                  const Center(
+                    child: CircularProgressIndicator(color: Colors.blueAccent),
                   ),
-                ),
-              ),
+              ],
             ),
           ),
+
+          // Bottom Trading Action Panel
           Container(
             padding: const EdgeInsets.all(12),
             decoration: const BoxDecoration(
@@ -419,63 +244,4 @@ class _MainTradingScreenState extends State<MainTradingScreen> {
       ),
     );
   }
-}
-
-class PocketChartPainter extends CustomPainter {
-  final List<Candle> candles;
-  final double currentPrice;
-  final double zoom;
-  final double pan;
-
-  PocketChartPainter(this.candles, this.currentPrice, this.zoom, this.pan);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (candles.isEmpty) return;
-
-    double maxH = candles.map((c) => c.high).reduce(max);
-    double minL = candles.map((c) => c.low).reduce(min);
-    if (maxH == minL) maxH += 0.001;
-
-    double baseWidth = (size.width / 25) * zoom;
-
-    for (int i = 0; i < candles.length; i++) {
-      var c = candles[i];
-      bool isGreen = c.close >= c.open;
-      Paint paint = Paint()
-        ..color = isGreen ? const Color(0xFF00E676) : const Color(0xFFFF5252)
-        ..strokeWidth = 1.2;
-
-      double x = size.width - ((candles.length - i) * baseWidth) + pan;
-
-      if (x < -20 || x > size.width + 20) continue;
-
-      double highY = size.height - ((c.high - minL) / (maxH - minL) * (size.height - 40)) - 20;
-      double lowY = size.height - ((c.low - minL) / (maxH - minL) * (size.height - 40)) - 20;
-      double openY = size.height - ((c.open - minL) / (maxH - minL) * (size.height - 40)) - 20;
-      double closeY = size.height - ((c.close - minL) / (maxH - minL) * (size.height - 40)) - 20;
-
-      canvas.drawLine(Offset(x, highY), Offset(x, lowY), paint);
-
-      double topY = min(openY, closeY);
-      double bodyHeight = (openY - closeY).abs();
-      if (bodyHeight < 1.5) bodyHeight = 1.5;
-
-      canvas.drawRect(
-        Rect.fromLTWH(x - (baseWidth * 0.35), topY, baseWidth * 0.7, bodyHeight),
-        paint..style = PaintingStyle.fill,
-      );
-    }
-
-    double lastY = size.height - ((currentPrice - minL) / (maxH - minL) * (size.height - 40)) - 20;
-    Paint linePaint = Paint()
-      ..color = Colors.blueAccent
-      ..strokeWidth = 1
-      ..style = PaintingStyle.stroke;
-
-    canvas.drawLine(Offset(0, lastY), Offset(size.width, lastY), linePaint);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }

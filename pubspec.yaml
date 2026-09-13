@@ -1,5 +1,5 @@
-name: pocket_trading
-description: "Pocket Trading Application"
+name: pocket_trading_app
+description: "Pocket Option Pro App"
 publish_to: 'none'
 version: 1.0.0+1
 
@@ -9,12 +9,13 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  cupertino_icons: ^1.0.6
+  cupertino_icons: ^1.0.8
+  webview_flutter: ^4.10.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^3.0.0
+  flutter_lints: ^5.0.0
 
 flutter:
   uses-material-design: true
