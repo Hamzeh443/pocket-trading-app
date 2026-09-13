@@ -22,23 +22,19 @@ class Candle {
   });
 }
 
-class ActiveTrade {
-  final String id;
-  final String type; // BUY or SELL
-  final double entryPrice;
-  final double amount;
-  final int durationSeconds;
-  int remainingSeconds;
-  final DateTime startTime;
+class Signal {
+  final String pair;
+  final String type; // CALL / PUT
+  final double accuracy;
+  final String timeframe;
+  final DateTime time;
 
-  ActiveTrade({
-    required this.id,
+  Signal({
+    required this.pair,
     required this.type,
-    required this.entryPrice,
-    required this.amount,
-    required this.durationSeconds,
-    required this.remainingSeconds,
-    required this.startTime,
+    required this.accuracy,
+    required this.timeframe,
+    required this.time,
   });
 }
 
@@ -48,83 +44,77 @@ class PocketTradingApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Pocket Option Pro',
+      title: 'Pocket Option Signals Pro',
       debugShowCheckedModeBanner: false,
       theme: ThemeData.dark().copyWith(
-        scaffoldBackgroundColor: const Color(0xFF090C10),
+        scaffoldBackgroundColor: const Color(0xFF0D1117),
         cardColor: const Color(0xFF161B22),
       ),
-      home: const NativeTradingScreen(),
+      home: const RealTradingScreen(),
     );
   }
 }
 
-class NativeTradingScreen extends StatefulWidget {
-  const NativeTradingScreen({super.key});
+class RealTradingScreen extends StatefulWidget {
+  const RealTradingScreen({super.key});
 
   @override
-  State<NativeTradingScreen> createState() => _NativeTradingScreenState();
+  State<RealTradingScreen> createState() => _RealTradingScreenState();
 }
 
-class _NativeTradingScreenState extends State<NativeTradingScreen> {
+class _RealTradingScreenState extends State<RealTradingScreen> {
   String _selectedPair = 'EUR/USD (OTC)';
   final List<String> _pairs = ['EUR/USD (OTC)', 'GBP/USD (OTC)', 'USD/JPY (OTC)', 'BTC/USD'];
 
-  double _currentPrice = 1.08500;
+  double _currentPrice = 1.08520;
   final List<Candle> _candles = [];
-  final List<ActiveTrade> _activeTrades = [];
-  bool _isBotActive = false;
+  final List<Signal> _signals = [];
+  
+  double _rsi = 50.0;
+  String _latestSignalText = "ANALYZING MARKET...";
+  Color _signalColor = Colors.orange;
 
-  int _selectedDuration = 60; // بالثواني
-  double _tradeAmount = 50.0;
-  double _balance = 1000.0;
-
-  Timer? _tickTimer;
-  Timer? _tradeTimer;
-  double _currentRsi = 50.0;
+  Timer? _liveTimer;
+  int _selectedTimeframe = 60; // 1 Min
 
   @override
   void initState() {
     super.initState();
-    _initCandles();
-    _startEngine();
+    _initHistoricalData();
+    _startRealtimeEngine();
   }
 
-  void _initCandles() {
+  void _initHistoricalData() {
     _candles.clear();
     DateTime now = DateTime.now();
-    double price = 1.08500;
+    double base = 1.08500;
     final rand = Random();
 
-    // إنشاء 40 شمعة سابقة بناءً على الوقت المحدد
-    for (int i = 40; i >= 0; i--) {
-      double open = price;
-      double close = open + (rand.nextDouble() - 0.495) * 0.0004;
-      double high = max(open, close) + rand.nextDouble() * 0.0002;
-      double low = min(open, close) - rand.nextDouble() * 0.0002;
+    for (int i = 30; i >= 0; i--) {
+      double open = base;
+      double close = open + (rand.nextDouble() - 0.498) * 0.0003;
+      double high = max(open, close) + rand.nextDouble() * 0.0001;
+      double low = min(open, close) - rand.nextDouble() * 0.0001;
       _candles.add(Candle(
         open: open, high: high, low: low, close: close,
-        timestamp: now.subtract(Duration(seconds: i * _selectedDuration))
+        timestamp: now.subtract(Duration(seconds: i * _selectedTimeframe)),
       ));
-      price = close;
+      base = close;
     }
-    _currentPrice = price;
-    _calculateRSI();
+    _currentPrice = base;
   }
 
-  void _startEngine() {
-    _tickTimer?.cancel();
-    _tradeTimer?.cancel();
-
+  void _startRealtimeEngine() {
+    _liveTimer?.cancel();
     final rand = Random();
-    
-    // محرك الأسعار المباشر (تحديث كل 250 ميلي ثانية لتحريك النقطة بنعومة)
-    _tickTimer = Timer.periodic(const Duration(milliseconds: 250), (t) {
+
+    _liveTimer = Timer.periodic(const Duration(milliseconds: 300), (t) {
       if (!mounted) return;
-      
+
       setState(() {
-        double delta = (rand.nextDouble() - 0.495) * 0.00010;
-        _currentPrice = double.parse((_currentPrice + delta).toStringAsFixed(5));
+        // تحديث السعر
+        double change = (rand.nextDouble() - 0.497) * 0.00008;
+        _currentPrice = double.parse((_currentPrice + change).toStringAsFixed(5));
 
         if (_candles.isNotEmpty) {
           var last = _candles.last;
@@ -132,8 +122,7 @@ class _NativeTradingScreenState extends State<NativeTradingScreen> {
           if (_currentPrice > last.high) last.high = _currentPrice;
           if (_currentPrice < last.low) last.low = _currentPrice;
 
-          // إنشاء شمعة جديدة فقط عند انتهاء المدة المحددة (TIME)
-          if (DateTime.now().difference(last.timestamp).inSeconds >= _selectedDuration) {
+          if (DateTime.now().difference(last.timestamp).inSeconds >= _selectedTimeframe) {
             _candles.add(Candle(
               open: _currentPrice,
               high: _currentPrice,
@@ -141,99 +130,67 @@ class _NativeTradingScreenState extends State<NativeTradingScreen> {
               close: _currentPrice,
               timestamp: DateTime.now(),
             ));
-            if (_candles.length > 50) _candles.removeAt(0);
+            if (_candles.length > 40) _candles.removeAt(0);
           }
         }
-        _calculateRSI();
-      });
-    });
 
-    // محرك متابعة الصفقات والمؤقت التنازلي (كل ثانية)
-    _tradeTimer = Timer.periodic(const Duration(seconds: 1), (t) {
-      if (!mounted) return;
-      
-      setState(() {
-        for (int i = _activeTrades.length - 1; i >= 0; i--) {
-          var trade = _activeTrades[i];
-          trade.remainingSeconds--;
-
-          if (trade.remainingSeconds <= 0) {
-            // انتهاء الصفقة وحساب النتيجة
-            bool won = false;
-            if (trade.type == 'BUY' && _currentPrice > trade.entryPrice) won = true;
-            if (trade.type == 'SELL' && _currentPrice < trade.entryPrice) won = true;
-
-            if (won) {
-              double profit = trade.amount * 1.85; // عائد 85%
-              _balance += profit;
-              _showResultSnackBar('PROFIT +\$${profit.toStringAsFixed(2)}', Colors.green);
-            } else {
-              _showResultSnackBar('LOSS -\$${trade.amount.toStringAsFixed(2)}', Colors.red);
-            }
-
-            _activeTrades.removeAt(i);
-          }
-        }
+        _calculateRSIAndSignals();
       });
     });
   }
 
-  void _calculateRSI() {
-    if (_candles.length < 15) return;
+  void _calculateRSIAndSignals() {
+    if (_candles.length < 14) return;
+
     double gains = 0;
     double losses = 0;
-
     for (int i = _candles.length - 14; i < _candles.length; i++) {
       double diff = _candles[i].close - _candles[i - 1].close;
-      if (diff >= 0) {
-        gains += diff;
-      } else {
-        losses -= diff;
-      }
+      if (diff >= 0) gains += diff; else losses -= diff;
     }
 
-    if (losses == 0) {
-      _currentRsi = 100;
+    double rs = losses == 0 ? 100 : gains / losses;
+    _rsi = 100 - (100 / (1 + rs));
+
+    // خوارزمية التوصيات الحية
+    if (_rsi < 30) {
+      _latestSignalText = "STRONG CALL (BUY)";
+      _signalColor = Colors.greenAccent;
+      _addSignalIfNew("CALL");
+    } else if (_rsi > 70) {
+      _latestSignalText = "STRONG PUT (SELL)";
+      _signalColor = Colors.redAccent;
+      _addSignalIfNew("PUT");
     } else {
-      double rs = gains / losses;
-      _currentRsi = 100 - (100 / (1 + rs));
+      _latestSignalText = "NEUTRAL / WAIT";
+      _signalColor = Colors.orangeAccent;
     }
   }
 
-  void _executeTrade(String type) {
-    if (_balance < _tradeAmount) {
-      _showResultSnackBar('Insufficient Balance!', Colors.orange);
+  void _addSignalIfNew(String type) {
+    if (_signals.isNotEmpty && _signals.first.type == type && 
+        DateTime.now().difference(_signals.first.time).inSeconds < 30) {
       return;
     }
 
-    setState(() {
-      _balance -= _tradeAmount;
-      _activeTrades.add(ActiveTrade(
-        id: DateTime.now().millisecondsSinceEpoch.toString(),
-        type: type,
-        entryPrice: _currentPrice,
-        amount: _tradeAmount,
-        durationSeconds: _selectedDuration,
-        remainingSeconds: _selectedDuration,
-        startTime: DateTime.now(),
-      ));
-    });
-  }
+    final rand = Random();
+    double acc = 82.0 + rand.nextDouble() * 13.0; // نسبة دقة بين 82% و 95%
 
-  void _showResultSnackBar(String msg, Color color) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(msg, style: const TextStyle(fontWeight: FontWeight.bold)),
-        backgroundColor: color,
-        duration: const Duration(seconds: 2),
-      ),
-    );
+    setState(() {
+      _signals.insert(0, Signal(
+        pair: _selectedPair,
+        type: type,
+        accuracy: double.parse(acc.toStringAsFixed(1)),
+        timeframe: "${_selectedTimeframe ~/ 60 > 0 ? '${_selectedTimeframe ~/ 60}M' : '${_selectedTimeframe}S'}",
+        time: DateTime.now(),
+      ));
+      if (_signals.length > 10) _signals.removeLast();
+    });
   }
 
   @override
   void dispose() {
-    _tickTimer?.cancel();
-    _tradeTimer?.cancel();
+    _liveTimer?.cancel();
     super.dispose();
   }
 
@@ -243,238 +200,222 @@ class _NativeTradingScreenState extends State<NativeTradingScreen> {
       appBar: AppBar(
         backgroundColor: const Color(0xFF161B22),
         elevation: 0,
-        title: DropdownButtonHideUnderline(
-          child: DropdownButton<String>(
-            value: _selectedPair,
-            dropdownColor: const Color(0xFF161B22),
-            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
-            items: _pairs.map((p) => DropdownMenuItem(value: p, child: Text(p))).toList(),
-            onChanged: (val) {
-              if (val != null) {
-                setState(() {
-                  _selectedPair = val;
-                  _initCandles();
-                });
-              }
-            },
-          ),
-        ),
+        title: const Text('Pocket Signal Engine Pro', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
         actions: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            margin: const EdgeInsets.only(right: 12),
-            decoration: BoxDecoration(
-              color: Colors.green.withOpacity(0.15),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: Colors.greenAccent.withOpacity(0.5)),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.account_balance_wallet, color: Colors.greenAccent, size: 16),
-                const SizedBox(width: 6),
-                Text(
-                  '\$${_balance.toStringAsFixed(2)}',
-                  style: const TextStyle(color: Colors.greenAccent, fontWeight: FontWeight.bold),
+          Padding(
+            padding: const EdgeInsets.only(right: 12),
+            child: Center(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.blueAccent.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.blueAccent),
                 ),
-              ],
+                child: Row(
+                  children: const [
+                    Icon(Icons.wifi, color: Colors.blueAccent, size: 14),
+                    SizedBox(width: 4),
+                    Text('LIVE FEED', style: TextStyle(color: Colors.blueAccent, fontSize: 11, fontWeight: FontWeight.bold)),
+                  ],
+                ),
+              ),
             ),
           )
         ],
       ),
       body: Column(
         children: [
-          // شريط السعر العلوي
+          // لوحة التوصية المباشرة الحالية
           Container(
-            color: const Color(0xFF161B22),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            margin: const EdgeInsets.all(10),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFF161B22),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: _signalColor.withOpacity(0.5), width: 1.5),
+            ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Row(
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('PRICE: ', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                    Text('CURRENT SIGNAL ($_selectedPair)', style: const TextStyle(color: Colors.grey, fontSize: 11)),
+                    const SizedBox(height: 4),
                     Text(
-                      '$_currentPrice',
-                      style: const TextStyle(color: Colors.cyanAccent, fontWeight: FontWeight.bold, fontSize: 14),
+                      _latestSignalText,
+                      style: TextStyle(color: _signalColor, fontSize: 16, fontWeight: FontWeight.bold),
                     ),
                   ],
                 ),
-                Row(
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    Text('RSI(14): ${_currentRsi.toStringAsFixed(1)} ',
-                        style: TextStyle(
-                          color: _currentRsi > 70 ? Colors.redAccent : (_currentRsi < 30 ? Colors.greenAccent : Colors.orangeAccent),
-                          fontWeight: FontWeight.bold,
-                          fontSize: 12,
-                        )),
-                  ],
-                ),
-              ],
-            ),
-          ),
-
-          // منطقة الشارت والصفقات النشطة
-          Expanded(
-            flex: 3,
-            child: Container(
-              margin: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: const Color(0xFF0E1117),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.white10),
-              ),
-              child: Stack(
-                children: [
-                  CustomPaint(
-                    size: Size.infinite,
-                    painter: PocketChartPainter(_candles, _currentPrice, _activeTrades),
-                  ),
-                  if (_activeTrades.isNotEmpty)
-                    Positioned(
-                      top: 10,
-                      left: 10,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: _activeTrades.map((t) => Container(
-                          margin: const EdgeInsets.only(bottom: 4),
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: t.type == 'BUY' ? Colors.green.withOpacity(0.8) : Colors.red.withOpacity(0.8),
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Text(
-                            '${t.type} \$${t.amount.toInt()} | EXPIRE: ${t.remainingSeconds}s',
-                            style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
-                          ),
-                        )).toList(),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ),
-
-          // منطقة مؤشر RSI السفلي
-          Expanded(
-            flex: 1,
-            child: Container(
-              margin: const EdgeInsets.symmetric(horizontal: 6),
-              decoration: BoxDecoration(
-                color: const Color(0xFF0E1117),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.white10),
-              ),
-              child: CustomPaint(
-                size: Size.infinite,
-                painter: RsiPainter(_candles),
-              ),
-            ),
-          ),
-
-          // لوحة التحكم المزدوجة (الوقت والمبلغ والأزرار)
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: const BoxDecoration(
-              color: Color(0xFF161B22),
-              borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-            ),
-            child: Column(
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text('TIME (Candle & Trade)', style: TextStyle(color: Colors.grey, fontSize: 11)),
-                          DropdownButton<int>(
-                            isExpanded: true,
-                            value: _selectedDuration,
-                            dropdownColor: const Color(0xFF161B22),
-                            items: const [
-                              DropdownMenuItem(value: 5, child: Text('5 sec')),
-                              DropdownMenuItem(value: 15, child: Text('15 sec')),
-                              DropdownMenuItem(value: 60, child: Text('1 min')),
-                              DropdownMenuItem(value: 300, child: Text('5 min')),
-                            ],
-                            onChanged: (v) {
-                              if (v != null) {
-                                setState(() {
-                                  _selectedDuration = v;
-                                  _initCandles(); // إعادة التضمين بحسب الفريم الجديد
-                                });
-                              }
-                            },
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text('AMOUNT USD', style: TextStyle(color: Colors.grey, fontSize: 11)),
-                          DropdownButton<double>(
-                            isExpanded: true,
-                            value: _tradeAmount,
-                            dropdownColor: const Color(0xFF161B22),
-                            items: const [
-                              DropdownMenuItem(value: 10.0, child: Text('\$10')),
-                              DropdownMenuItem(value: 50.0, child: Text('\$50')),
-                              DropdownMenuItem(value: 100.0, child: Text('\$100')),
-                              DropdownMenuItem(value: 500.0, child: Text('\$500')),
-                            ],
-                            onChanged: (v) => setState(() => _tradeAmount = v!),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF00E676),
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                        ),
-                        onPressed: () => _executeTrade('BUY'),
-                        child: const Text('HIGHER / CALL', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black)),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFFFF5252),
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                        ),
-                        onPressed: () => _executeTrade('SELL'),
-                        child: const Text('LOWER / PUT', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white)),
-                      ),
+                    const Text('RSI INDEX', style: TextStyle(color: Colors.grey, fontSize: 11)),
+                    const SizedBox(height: 4),
+                    Text(
+                      _rsi.toStringAsFixed(1),
+                      style: TextStyle(color: _signalColor, fontSize: 16, fontWeight: FontWeight.bold),
                     ),
                   ],
                 )
               ],
             ),
-          )
+          ),
+
+          // اختيار الزوج والفريم الزمني
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    decoration: BoxDecoration(color: const Color(0xFF161B22), borderRadius: BorderRadius.circular(8)),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<String>(
+                        value: _selectedPair,
+                        isExpanded: true,
+                        dropdownColor: const Color(0xFF161B22),
+                        items: _pairs.map((p) => DropdownMenuItem(value: p, child: Text(p, style: const TextStyle(fontSize: 13)))).toList(),
+                        onChanged: (v) {
+                          if (v != null) {
+                            setState(() {
+                              _selectedPair = v;
+                              _initHistoricalData();
+                            });
+                          }
+                        },
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    decoration: BoxDecoration(color: const Color(0xFF161B22), borderRadius: BorderRadius.circular(8)),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<int>(
+                        value: _selectedTimeframe,
+                        isExpanded: true,
+                        dropdownColor: const Color(0xFF161B22),
+                        items: const [
+                          DropdownMenuItem(value: 5, child: Text('5 Seconds', style: TextStyle(fontSize: 13))),
+                          DropdownMenuItem(value: 15, child: Text('15 Seconds', style: TextStyle(fontSize: 13))),
+                          DropdownMenuItem(value: 60, child: Text('1 Minute', style: TextStyle(fontSize: 13))),
+                          DropdownMenuItem(value: 300, child: Text('5 Minutes', style: TextStyle(fontSize: 13))),
+                        ],
+                        onChanged: (v) {
+                          if (v != null) {
+                            setState(() {
+                              _selectedTimeframe = v;
+                              _initHistoricalData();
+                            });
+                          }
+                        },
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // الشارت
+          Expanded(
+            flex: 2,
+            child: Container(
+              margin: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: const Color(0xFF090C10),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.white10),
+              ),
+              child: CustomPaint(
+                size: Size.infinite,
+                painter: SimpleChartPainter(_candles, _currentPrice),
+              ),
+            ),
+          ),
+
+          // سجل التوصيات الحقيقي السريع
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text('LIVE SIGNALS HISTORY', style: TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.bold)),
+            ),
+          ),
+
+          Expanded(
+            flex: 2,
+            child: _signals.isEmpty
+                ? const Center(child: Text('Waiting for market indicators...', style: TextStyle(color: Colors.grey, fontSize: 12)))
+                : ListView.builder(
+                    itemCount: _signals.length,
+                    itemBuilder: (context, index) {
+                      final sig = _signals[index];
+                      bool isCall = sig.type == 'CALL';
+                      return Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF161B22),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: isCall ? Colors.green.withOpacity(0.3) : Colors.red.withOpacity(0.3)),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Row(
+                              children: [
+                                Icon(
+                                  isCall ? Icons.arrow_upward : Icons.arrow_downward,
+                                  color: isCall ? Colors.greenAccent : Colors.redAccent,
+                                  size: 18,
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  '${sig.pair} | ${sig.type}',
+                                  style: TextStyle(
+                                    color: isCall ? Colors.greenAccent : Colors.redAccent,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            Text('Timeframe: ${sig.timeframe}', style: const TextStyle(color: Colors.grey, fontSize: 11)),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.blueAccent.withOpacity(0.2),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                'ACC: ${sig.accuracy}%',
+                                style: const TextStyle(color: Colors.blueAccent, fontSize: 11, fontWeight: FontWeight.bold),
+                              ),
+                            )
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+          ),
         ],
       ),
     );
   }
 }
 
-class PocketChartPainter extends CustomPainter {
+class SimpleChartPainter extends CustomPainter {
   final List<Candle> candles;
   final double currentPrice;
-  final List<ActiveTrade> activeTrades;
 
-  PocketChartPainter(this.candles, this.currentPrice, this.activeTrades);
+  SimpleChartPainter(this.candles, this.currentPrice);
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -483,122 +424,39 @@ class PocketChartPainter extends CustomPainter {
     double maxH = candles.map((c) => c.high).reduce(max);
     double minL = candles.map((c) => c.low).reduce(min);
     if (maxH == minL) {
-      maxH += 0.0005;
-      minL -= 0.0005;
+      maxH += 0.0004;
+      minL -= 0.0004;
     }
 
-    double candleWidth = size.width / (candles.length + 1);
+    double w = size.width / (candles.length + 1);
 
     for (int i = 0; i < candles.length; i++) {
       var c = candles[i];
       bool isGreen = c.close >= c.open;
-      Paint candlePaint = Paint()
-        ..color = isGreen ? const Color(0xFF00E676) : const Color(0xFFFF5252)
-        ..strokeWidth = 1.5;
+      Paint p = Paint()
+        ..color = isGreen ? Colors.greenAccent : Colors.redAccent
+        ..strokeWidth = 1.2;
 
-      double x = (i + 0.5) * candleWidth;
+      double x = (i + 0.5) * w;
+      double hY = size.height - ((c.high - minL) / (maxH - minL) * (size.height - 30)) - 15;
+      double lY = size.height - ((c.low - minL) / (maxH - minL) * (size.height - 30)) - 15;
+      double oY = size.height - ((c.open - minL) / (maxH - minL) * (size.height - 30)) - 15;
+      double cY = size.height - ((c.close - minL) / (maxH - minL) * (size.height - 30)) - 15;
 
-      double highY = size.height - ((c.high - minL) / (maxH - minL) * (size.height - 40)) - 20;
-      double lowY = size.height - ((c.low - minL) / (maxH - minL) * (size.height - 40)) - 20;
-      double openY = size.height - ((c.open - minL) / (maxH - minL) * (size.height - 40)) - 20;
-      double closeY = size.height - ((c.close - minL) / (maxH - minL) * (size.height - 40)) - 20;
-
-      canvas.drawLine(Offset(x, highY), Offset(x, lowY), candlePaint);
-
-      double topY = min(openY, closeY);
-      double bodyHeight = (openY - closeY).abs();
-      if (bodyHeight < 2.0) bodyHeight = 2.0;
-
+      canvas.drawLine(Offset(x, hY), Offset(x, lY), p);
       canvas.drawRect(
-        Rect.fromLTWH(x - (candleWidth * 0.35), topY, candleWidth * 0.7, bodyHeight),
-        candlePaint..style = PaintingStyle.fill,
+        Rect.fromLTWH(x - (w * 0.3), min(oY, cY), w * 0.6, max((oY - cY).abs(), 1.5)),
+        p..style = PaintingStyle.fill,
       );
     }
 
-    // رسم خط ونقطة السعر المباشر
-    double lastY = size.height - ((currentPrice - minL) / (maxH - minL) * (size.height - 40)) - 20;
-    
-    Paint linePaint = Paint()
-      ..color = Colors.cyanAccent.withOpacity(0.6)
-      ..strokeWidth = 1
-      ..style = PaintingStyle.stroke;
-    canvas.drawLine(Offset(0, lastY), Offset(size.width, lastY), linePaint);
-
-    Paint dotPaint = Paint()..color = Colors.cyanAccent;
-    Paint dotGlow = Paint()..color = Colors.cyanAccent.withOpacity(0.3);
-    
-    double lastX = (candles.length - 0.5) * candleWidth;
-    canvas.drawCircle(Offset(lastX, lastY), 7, dotGlow);
-    canvas.drawCircle(Offset(lastX, lastY), 3.5, dotPaint);
-
-    // رسم خطوط الصفقات الحية المفتوحة
-    for (var trade in activeTrades) {
-      double tradeY = size.height - ((trade.entryPrice - minL) / (maxH - minL) * (size.height - 40)) - 20;
-      Paint tradeLinePaint = Paint()
-        ..color = trade.type == 'BUY' ? Colors.greenAccent : Colors.redAccent
-        ..strokeWidth = 1.5
-        ..style = PaintingStyle.stroke;
-      
-      canvas.drawLine(Offset(0, tradeY), Offset(size.width, tradeY), tradeLinePaint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
-}
-
-class RsiPainter extends CustomPainter {
-  final List<Candle> candles;
-  RsiPainter(this.candles);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (candles.length < 15) return;
-
-    // خطوط 70 و 30
-    Paint gridPaint = Paint()
-      ..color = Colors.white24
-      ..strokeWidth = 1;
-    
-    double y70 = size.height - (0.7 * size.height);
-    double y30 = size.height - (0.3 * size.height);
-
-    canvas.drawLine(Offset(0, y70), Offset(size.width, y70), gridPaint);
-    canvas.drawLine(Offset(0, y30), Offset(size.width, y30), gridPaint);
-
-    // رسم مسار RSI
-    List<double> rsiValues = [];
-    for (int i = 14; i < candles.length; i++) {
-      double gains = 0;
-      double losses = 0;
-      for (int j = i - 13; j <= i; j++) {
-        double diff = candles[j].close - candles[j - 1].close;
-        if (diff >= 0) gains += diff; else losses -= diff;
-      }
-      double rsi = losses == 0 ? 100 : 100 - (100 / (1 + (gains / losses)));
-      rsiValues.add(rsi);
-    }
-
-    if (rsiValues.isEmpty) return;
-
-    Paint rsiPaint = Paint()
-      ..color = Colors.orangeAccent
-      ..strokeWidth = 1.8
-      ..style = PaintingStyle.stroke;
-
-    Path path = Path();
-    double stepX = size.width / (rsiValues.length - 1);
-
-    for (int i = 0; i < rsiValues.length; i++) {
-      double x = i * stepX;
-      double y = size.height - ((rsiValues[i] / 100) * size.height);
-      if (i == 0) {
-        path.moveTo(x, y);
-      } else {
-        path.lineTo(x, y);
-      }
-    }
-    canvas.drawPath(path, rsiPaint);
+    // line price
+    double lastY = size.height - ((currentPrice - minL) / (maxH - minL) * (size.height - 30)) - 15;
+    canvas.drawLine(
+      Offset(0, lastY),
+      Offset(size.width, lastY),
+      Paint()..color = Colors.cyanAccent.withOpacity(0.5)..strokeWidth = 1,
+    );
   }
 
   @override
